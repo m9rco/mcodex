@@ -120,14 +120,17 @@ writeFileSync(${JSON.stringify(record)}, JSON.stringify({
 }));
 const event = value => appendFileSync(${JSON.stringify(context.events)}, JSON.stringify(value) + '\\n', { mode: 0o600 });
 event({ type: 'codex-start', pid: process.pid });
-process.stdout.write(${JSON.stringify(codexOutput)});
 if (${JSON.stringify(codexHolds)}) {
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
     event({ type: 'codex-stop', signal });
     process.exit(signal === 'SIGINT' ? 130 : 143);
   });
   setInterval(() => {}, 1000);
-} else process.exit(17);
+}
+process.stdout.write(${JSON.stringify(codexOutput)}, () => {
+  event({ type: 'codex-ready', pid: process.pid });
+  if (!${JSON.stringify(codexHolds)}) process.exit(17);
+});
 `);
   const preloads = {};
   for (const [kind, streams] of Object.entries({ terminal: ['stdin', 'stdout', 'stderr'], inputOnly: ['stdin'], outputOnly: ['stdout', 'stderr'] })) {
@@ -180,7 +183,7 @@ async function run(t, context, args, { terminal = false, setup = false, interrup
   if (interruptAt) action = (async () => {
     const list = await waitFor(`fixture ${interruptAt}`, async () => {
       const list = await events(context);
-      const ready = list.some(event => event.type === (interruptAt === 'catalog' ? 'catalog-request' : 'codex-start'));
+      const ready = list.some(event => event.type === (interruptAt === 'catalog' ? 'catalog-request' : 'codex-ready'));
       return ready ? list : undefined;
     });
     const transport = list.find(event => event.type === 'transport-start');
