@@ -58,6 +58,8 @@ mcodex 使用本机随机端口和临时 API Key，通过官方 Codex 的自定�
 
 此版本固定依赖 `@openai/codex@0.162.1`，并捆绑各平台的 Rust 转发程序。安装过程中无需编译 Rust，也没有下载二进制的 `postinstall` 脚本。Windows 暂未支持。
 
+Linux 本机工具需要系统允许官方 Codex 创建沙箱。Docker 默认限制可能阻止嵌套沙箱；具体测试条件与平台覆盖见 [验收记录](docs/VALIDATION.md)。
+
 远端网关必须实现 MLab Gateway 的 WSS 协议，并已完成合法的订阅授权。使用仍需满足 OpenAI 账户、套餐和地区适用规则，mcodex 不改变这些资格。
 
 Codex 的自定义提供商能力见 [官方配置文档](https://developers.openai.com/codex/config-advanced)，订阅访问接口见 [官方 Sign in with ChatGPT 文档](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)。

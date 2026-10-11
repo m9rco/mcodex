@@ -4,7 +4,7 @@
 
 把目前需要独立二进制、配置文件和服务管理的客户端收敛成三个操作：`npm install -g mcodex`、`mcodex login`、`mcodex`。远端继续运行既有 MLab Gateway，保存订阅 OAuth，接受经 Token 认证的 WSS 长连接。
 
-主包与开发仓库公开。实际网关地址、连接 Token 和 OAuth 凭据属于运行时设置，不进入 GitHub、npm 包或默认配置。
+主包与开发仓库公开。mcodex 的连接地址由首次登录填写，配置模板使用示例域名。连接 Token 和 OAuth 凭据不进入 GitHub 或 npm 包。
 
 ## 架构选择
 

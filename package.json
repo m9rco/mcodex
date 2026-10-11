@@ -6,7 +6,7 @@
   "bin": { "mcodex": "bin/mcodex.js" },
   "engines": { "node": ">=22" },
   "os": ["linux", "darwin"],
-  "files": ["bin", "src", "README.md", "LICENSE", "NOTICE", "docs/PROPOSAL.md"],
+  "files": ["bin", "src", "README.md", "LICENSE", "NOTICE", "docs/PROPOSAL.md", "docs/VALIDATION.md"],
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node --check bin/mcodex.js && node --check src/cli.js && node --check src/tunnel.js",
