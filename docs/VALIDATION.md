@@ -2,7 +2,7 @@
 
 2026-10-11 验证 `mcodex@0.1.0`，固定官方 Codex CLI `0.162.1`，服务端协议版本 `0.3.3`。
 
-npm 因未加 scope 的包名与既有名称相似而拒绝发布，正式主包改为 `@m9rco/mcodex@0.1.1`，命令仍为 `mcodex`，三个原生包版本保持 `0.1.0`。`0.1.1` 只调整包名、版本和升级安装流程。以下真实工具和 Docker 结果来自原 `0.1.0` tarball；新版匿名 registry 安装结果须在发布后另行记录。
+npm 因未加 scope 的包名与既有名称相似而拒绝发布，正式主包改为 `@m9rco/mcodex@0.1.1`，命令仍为 `mcodex`，三个原生包版本保持 `0.1.0`。`0.1.1` 只调整包名、版本和升级安装流程。以下真实工具和 Docker 结果来自原 `0.1.0` tarball；新版公开安装与升级结果见下文。
 
 - 自动测试覆盖私有配置权限、符号链接与硬链接拒绝、隐藏输入取消、参数透传、端口分配、密钥隔离、原生进程退出和信号超时清理。23 项通过。
 - GitHub Actions 在 Ubuntu 与 Node.js 22 上完成安装、测试和包清单检查。
@@ -18,3 +18,13 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 这些测试用于兼容性验收，没有进行模型吞吐或延迟基准，不能据此声称套壳提高模型速度。测试使用临时工作区，不把生产连接 Token 放入公开 CI。
 
 维护者完成 `mcodex login` 后，可运行 `node scripts/smoke-tools.mjs` 重复真实工具验收。这会消耗一个实际模型任务，包含工具调用所需的请求回合。
+
+## 0.1.1 公开发行验收
+
+- 主包 `@m9rco/mcodex@0.1.1` 与三个 `@m9rco/mcodex-<平台>@0.1.0` 均可匿名读取公开 npm metadata。四个版本的 `dist.integrity` 和 `dist.shasum` 全部匹配冻结 tarball，主包 `latest` 为 `0.1.1`。
+- [GitHub v0.1.1 Release](https://github.com/m9rco/mcodex/releases/tag/v0.1.1) 的六个公开资产，API SHA-256 digest 全部匹配冻结文件和 `SHA256SUMS`；清单自身的 digest 也通过校验。旧 `v0.1.0` 标签仍指向原提交 `ac93184`。
+- 原生 Linux ARM64 Docker 使用 Node.js `22.23.3`、npm `10.9.9`，在空 npm 配置、新缓存与独立全局安装目录中，匿名执行 `npm install -g @m9rco/mcodex@0.1.1`，退出码 `0`。正确的 ARM64 optional 原生包自动安装，AArch64 ELF、二进制 SHA-256、help 与版本均通过检查，CLI 为 `0.1.1`，原生转发程序为 `0.3.2`。首次安装遇到 registry metadata `E404`；公开版本 metadata 可读取后重试成功。
+- 另一个无凭据、无宿主目录挂载的 ARM64 Docker 容器，从公开 GitHub 一键脚本完成旧未加 scope 包 `0.1.0` 到 scoped 主包 `0.1.1` 的升级。旧安装包已移除，连接配置和 Token 文件哈希保持一致，目录 `0700`、私有文件 `0600` 权限保留，CLI 与原生程序版本检查通过。
+- 提交 `fff202e` 的 [GitHub Actions](https://github.com/m9rco/mcodex/actions/runs/38147916704) 通过 Ubuntu / Node.js 22 的安装、测试和包清单检查。
+
+本次公开发行验收覆盖安装、资产完整性和升级；未连接网关，模型请求次数为 `0`。真实本机工具与沙箱覆盖仍以上述首版记录为准。已发布的 `v0.1.1` 标签和安装资产保持冻结，此文档作为后续验收记录更新。
