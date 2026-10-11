@@ -4,21 +4,25 @@
 
 ## 安装与使用
 
-需要 Node.js 22 或更新版本。支持 Linux x64、Linux ARM64 和 macOS ARM64。
+需要 Node.js 22 或更新版本。支持 Linux x64、Linux ARM64 和 macOS ARM64。npm 包名为 `@m9rco/mcodex`，安装后的命令为 `mcodex`。
 
 ```sh
-npm install -g mcodex
+npm install -g @m9rco/mcodex
 mcodex login --server wss://gateway.example/mlab-tunnel
 mcodex
 ```
 
 把示例地址换成自己的网关地址。`login` 会交互读取连接 Token；输入内容不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
 
-也可直接从公开 GitHub Release 安装，适用于 npm 主包尚未发布或需要固定安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
+如果安装过旧的未加 scope 包，先运行 `npm uninstall -g mcodex`，再安装 `@m9rco/mcodex`，避免同名命令冲突。卸载旧安装包会保留 mcodex 的连接配置。
+
+也可直接从公开 GitHub Release 安装，适用于固定版本和校验安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.0/install.sh | sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.1/install.sh | sh
 ```
+
+一键脚本会确认旧版全局包和命令属于本项目，再自动替换旧安装；不会使用 `--force` 覆盖其他程序的同名命令。
 
 自动化环境可以从受保护的文件读取 Token：
 
@@ -77,7 +81,7 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `mcodex`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.1.1`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.0`，npm 根据系统和 CPU 安装对应包。
 
 维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产固定来自已公布的 MLab Gateway `v0.3.2`，下载后校验固定 SHA-256；macOS 包使用提供的 ARM64 可执行文件。脚本不会访问用户连接配置。
 
@@ -89,4 +93,4 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-先发布三个平台包，再发布主包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+主包和原生包分别维护版本。`v0.1.1` Release 使用 `m9rco-mcodex-0.1.1.tgz` 与三个已发布的 `0.1.0` 原生 tarball；无需重新发布原生包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。

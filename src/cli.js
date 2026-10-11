@@ -6,7 +6,7 @@ import { promptText } from './prompt.js';
 import { chooseModel } from './provider.js';
 import { resolveNative, resolveCodex, startTunnel, runCodex } from './tunnel.js';
 
-export const help = `mcodex 0.1.0 — official Codex with automatic gateway setup
+export const help = `mcodex 0.1.1 — official Codex with automatic gateway setup
 
 Usage:
   mcodex [Codex arguments]           Start Codex; first run asks for connection settings
@@ -22,7 +22,7 @@ Login options:
   --token-file <path>        Read the connection Token from a file
   --model <id>               Select an available default model
 
-npm install -g mcodex
+npm install -g @m9rco/mcodex
 mcodex login --server wss://gateway.example/mlab-tunnel
 mcodex
 
@@ -95,7 +95,7 @@ export async function main(args) {
     return 0;
   }
   if (args[0] === '--version' || args[0] === '-V') {
-    console.log('mcodex 0.1.0 (official Codex 0.162.1)');
+    console.log('mcodex 0.1.1 (official Codex 0.162.1)');
     return 0;
   }
   const directory = stateDirectory();

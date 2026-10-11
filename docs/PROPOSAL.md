@@ -2,7 +2,7 @@
 
 ## 目标
 
-把目前需要独立二进制、配置文件和服务管理的客户端收敛成三个操作：`npm install -g mcodex`、`mcodex login`、`mcodex`。远端继续运行既有 MLab Gateway，保存订阅 OAuth，接受经 Token 认证的 WSS 长连接。
+把目前需要独立二进制、配置文件和服务管理的客户端收敛成三个操作：`npm install -g @m9rco/mcodex`、`mcodex login`、`mcodex`。远端继续运行既有 MLab Gateway，保存订阅 OAuth，接受经 Token 认证的 WSS 长连接。
 
 主包与开发仓库公开。mcodex 的连接地址由首次登录填写，配置模板使用示例域名。连接 Token 和 OAuth 凭据不进入 GitHub 或 npm 包。
 
@@ -16,7 +16,7 @@ Node.js 负责参数、首次设置、健康检查和生命周期；Rust 负责 
 
 ## 配置与分发
 
-- 主包 `mcodex@0.1.0` 固定使用 `@openai/codex@0.162.1`。
+- 主包 `@m9rco/mcodex@0.1.1` 固定使用 `@openai/codex@0.162.1`，原生包版本维持 `0.1.0`。
 - 三个平台包通过 npm `optionalDependencies` 分发预编译二进制，分别声明 `os` 和 `cpu`。
 - 平台包只包含二进制、许可证、来源说明和校验值；安装时无需 Cargo、SSH、systemd 或额外下载脚本。
 - 首次登录保存 `server` 和模型选择等非机密设置；连接 Token 单独保存，目录 `0700`、文件 `0600`。

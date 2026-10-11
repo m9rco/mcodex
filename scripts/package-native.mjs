@@ -90,7 +90,7 @@ try {
     await writeFile(join(directory, 'LICENSE'), license);
     await writeFile(join(directory, 'NOTICE'), notice);
     await writeFile(join(directory, 'SHA256SUMS'), `${binaryDigest}  bin/mlab-gateway\n`);
-    await writeFile(join(directory, 'README.md'), `# ${metadata.name}\n\nPlatform-specific transport for [mcodex](https://github.com/m9rco/mcodex). npm selects this package automatically. Install \`mcodex\` to use the CLI.\n\nMLab Gateway ${target.transportVersion}; MIT license. The binary SHA-256 is recorded in SHA256SUMS. This package has no installation scripts and contains no user configuration or credentials.\n`);
+    await writeFile(join(directory, 'README.md'), `# ${metadata.name}\n\nPlatform-specific transport for [mcodex](https://github.com/m9rco/mcodex). npm selects this package automatically. Install \`@m9rco/mcodex\` to use the CLI.\n\nMLab Gateway ${target.transportVersion}; MIT license. The binary SHA-256 is recorded in SHA256SUMS. This package has no installation scripts and contains no user configuration or credentials.\n`);
     console.log(`${metadata.name}@${options.version}: ${binaryDigest}`);
   }
 } finally {

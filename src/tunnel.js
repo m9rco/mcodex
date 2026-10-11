@@ -20,7 +20,7 @@ export async function resolveNative() {
   const name = nativePackage();
   let manifest;
   try { manifest = require.resolve(`${name}/package.json`); }
-  catch { throw new Error(`Native transport ${name} is missing. Reinstall mcodex with npm optional dependencies enabled.`); }
+  catch { throw new Error(`Native transport ${name} is missing. Reinstall @m9rco/mcodex with npm optional dependencies enabled.`); }
   const binary = path.join(path.dirname(manifest), 'bin', 'mlab-gateway');
   await access(binary, constants.X_OK);
   return binary;

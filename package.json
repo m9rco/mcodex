@@ -1,6 +1,6 @@
 {
-  "name": "mcodex",
-  "version": "0.1.0",
+  "name": "@m9rco/mcodex",
+  "version": "0.1.1",
   "description": "Run the official Codex CLI through an authenticated persistent gateway, with one-time setup.",
   "type": "module",
   "bin": { "mcodex": "bin/mcodex.js" },
