@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 test('login accepts non-argv secret sources and refuses ambiguous options', () => {
   assert.deepEqual(parseLogin(['--server', 'wss://example.org/path', '--token-stdin']), { server: 'wss://example.org/path', tokenStdin: true });
+  assert.deepEqual(parseLogin(['--no-launch', '--token-file', 'key']), { noLaunch: true, tokenFile: 'key' });
   assert.throws(() => parseLogin(['--token', 'secret']), /Unknown login option/);
   assert.throws(() => parseLogin(['--token-stdin', '--token-file', 'key']), /Choose either/);
   assert.throws(() => parseLogin(['--server']), /Missing value/);
   assert.throws(() => parseLogin(['--model', 'one', '--model', 'two']), /Duplicate option/);
+  assert.throws(() => parseLogin(['--no-launch', '--no-launch']), /Duplicate option/);
 });
 
 test('termination wakes login while its Token input pipe remains open', async t => {

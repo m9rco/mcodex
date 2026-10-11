@@ -17,7 +17,7 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 
 这些测试用于兼容性验收，没有进行模型吞吐或延迟基准，不能据此声称套壳提高模型速度。测试使用临时工作区，不把生产连接 Token 放入公开 CI。
 
-维护者完成 `mcodex login` 后，可运行 `node scripts/smoke-tools.mjs` 重复真实工具验收。这会消耗一个实际模型任务，包含工具调用所需的请求回合。
+维护者完成 `mcodex login --no-launch` 后，可运行 `node scripts/smoke-tools.mjs` 重复真实工具验收。这会消耗一个实际模型任务，包含工具调用所需的请求回合。
 
 ## 0.1.1 公开发行验收
 
@@ -28,3 +28,14 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 - 提交 `fff202e` 的 [GitHub Actions](https://github.com/m9rco/mcodex/actions/runs/38147916704) 通过 Ubuntu / Node.js 22 的安装、测试和包清单检查。
 
 本次公开发行验收覆盖安装、资产完整性和升级；未连接网关，模型请求次数为 `0`。真实本机工具与沙箱覆盖仍以上述首版记录为准。已发布的 `v0.1.1` 标签和安装资产保持冻结，此文档作为后续验收记录更新。
+
+## 0.1.2 登录后启动验收
+
+2026-10-12，`npm run check` 通过，`npm test` 共 38 项通过。
+
+- 交互终端执行 `mcodex login`，连接验证后直接启动 Codex；`--no-launch`、非终端及只有一侧为终端时只保存设置。
+- 首次直接运行 `mcodex` 和交互 `login` 均复用同一个转发进程和模型目录验证，Codex 使用已验证的本机端点，没有第二次建立连接。
+- 保留 Codex 参数和退出码；正常退出、验证阶段取消、Codex 阶段 SIGINT/SIGTERM 以及转发进程停止时，会清理临时进程和 candidate/runtime 目录。
+- 状态提示只写 stderr，exec 的 JSON stdout 保持干净；连接 Token 不进入终端输出、Codex 参数或子进程环境。
+
+上述新增流程测试使用本地模拟转发程序、Codex 执行器和 TTY，执行实际包装器代码；未访问生产 SG 或调用模型。原生转发程序、官方 Codex 版本和真实工具验收范围保持首版记录所述。

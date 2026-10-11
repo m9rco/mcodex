@@ -11,23 +11,23 @@ npm install -g @m9rco/mcodex
 mcodex
 ```
 
-首次直接运行 `mcodex` 会询问网关地址和连接 Token，验证成功后自动进入 Codex；以后运行 `mcodex` 就会直接连接并启动。Token 输入不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
+首次在终端运行 `mcodex` 或 `mcodex login`，会询问网关地址和连接 Token，验证成功后直接进入 Codex，无需再运行一次命令。以后运行 `mcodex` 就会直接连接并启动。Token 输入不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
 
 如果只想提前保存连接设置，可以运行：
 
 ```sh
-mcodex login --server wss://gateway.example/mlab-tunnel
+mcodex login --no-launch --server wss://gateway.example/mlab-tunnel
 mcodex
 ```
 
-把示例地址换成自己的网关地址。`mcodex login` 验证并保存设置后会返回终端；下一条 `mcodex` 才会打开 Codex 交互界面。
+把示例地址换成自己的网关地址。`--no-launch` 只保存连接设置；默认的 `mcodex login` 在标准输入和输出都连接终端时，会复用已验证的连接启动 Codex。脚本或管道环境中的 `login` 只保存设置。
 
 如果安装过旧的未加 scope 包，先运行 `npm uninstall -g mcodex`，再安装 `@m9rco/mcodex`，避免同名命令冲突。卸载旧安装包会保留 mcodex 的连接配置。
 
 也可直接从公开 GitHub Release 安装，适用于固定版本和校验安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.1/install.sh | sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.2/install.sh | sh
 ```
 
 一键脚本会确认旧版全局包和命令属于本项目，再自动替换旧安装；不会使用 `--force` 覆盖其他程序的同名命令。
@@ -35,7 +35,7 @@ curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.1/install.sh |
 自动化环境可以从受保护的文件读取 Token：
 
 ```sh
-mcodex login --server wss://gateway.example/mlab-tunnel --token-file ./connection-token
+mcodex login --no-launch --server wss://gateway.example/mlab-tunnel --token-file ./connection-token
 mcodex doctor
 mcodex exec "解释这个仓库的入口"
 ```
@@ -46,7 +46,8 @@ mcodex exec "解释这个仓库的入口"
 
 | 命令 | 用途 |
 | --- | --- |
-| `mcodex login` | 保存并验证连接，完成后运行 `mcodex` 打开 Codex |
+| `mcodex login` | 在终端验证并保存连接，成功后直接进入 Codex |
+| `mcodex login --no-launch` | 只验证并保存连接 |
 | `mcodex doctor` | 检查安装和连接，不发起模型生成 |
 | `mcodex logout` | 清除 mcodex 保存的连接信息 |
 | `mcodex` | 启动官方 Codex 交互界面 |
@@ -89,7 +90,7 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.1.1`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.0`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.1.2`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.0`，npm 根据系统和 CPU 安装对应包。
 
 维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产固定来自已公布的 MLab Gateway `v0.3.2`，下载后校验固定 SHA-256；macOS 包使用提供的 ARM64 可执行文件。脚本不会访问用户连接配置。
 
@@ -101,4 +102,4 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-主包和原生包分别维护版本。`v0.1.1` Release 使用 `m9rco-mcodex-0.1.1.tgz` 与三个已发布的 `0.1.0` 原生 tarball；无需重新发布原生包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+主包和原生包分别维护版本。`v0.1.2` Release 使用 `m9rco-mcodex-0.1.2.tgz` 与三个已发布的 `0.1.0` 原生 tarball；无需重新发布原生包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
