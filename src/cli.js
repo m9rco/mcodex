@@ -11,7 +11,7 @@ export const help = `mcodex 0.1.1 — official Codex with automatic gateway setu
 Usage:
   mcodex [Codex arguments]           Start Codex; first run asks for connection settings
   mcodex exec [Codex exec arguments] Run the official Codex non-interactively
-  mcodex login [options]             Save and verify a gateway connection
+  mcodex login [options]             Configure the connection; then run mcodex to open Codex
   mcodex doctor                     Check dependencies, connection and available models
   mcodex logout                     Delete mcodex connection settings
   mcodex codex [arguments]           Pass a reserved command through to official Codex
@@ -23,8 +23,10 @@ Login options:
   --model <id>               Select an available default model
 
 npm install -g @m9rco/mcodex
-mcodex login --server wss://gateway.example/mlab-tunnel
 mcodex
+
+Or configure the connection without opening Codex:
+mcodex login --server wss://gateway.example/mlab-tunnel
 
 Connection Token is never accepted as a command-line argument.
 MCODEX_CONFIG_DIR overrides the mcodex settings directory.
@@ -67,6 +69,20 @@ async function stdinToken(signal) {
   }
 }
 
+async function connectWithStatus(state, signal) {
+  if (!process.stderr.isTTY) return startTunnel(state, { signal });
+  console.error('mcodex: Connecting to the gateway...');
+  const progress = setInterval(() => {
+    console.error('mcodex: Still connecting to the gateway...');
+  }, 5000);
+  progress.unref();
+  try {
+    return await startTunnel(state, { signal });
+  } finally {
+    clearInterval(progress);
+  }
+}
+
 async function login(options, directory, signal) {
   const server = validateServer(options.server ?? await promptText('Gateway WSS URL: '));
   const rawToken = options.tokenStdin ? await stdinToken(signal)
@@ -77,7 +93,7 @@ async function login(options, directory, signal) {
   let tunnel;
   try {
     await saveState(candidate, { server, token, model: options.model });
-    tunnel = await startTunnel(await loadState(candidate), { signal });
+    tunnel = await connectWithStatus(await loadState(candidate), signal);
     const model = chooseModel(tunnel.models, options.model);
     signal?.throwIfAborted();
     await saveState(directory, { server, token, model });
@@ -116,18 +132,20 @@ export async function main(args) {
   try {
     if (args[0] === 'login') {
       await login(parseLogin(args.slice(1)), directory, controller.signal);
+      console.error('mcodex: Setup complete. Run `mcodex` to open Codex.');
       return 0;
     }
     let state;
     try { state = await loadState(directory); }
     catch (error) {
       if (error.code !== 'MCODEX_NOT_CONFIGURED' || args[0] === 'doctor' || !process.stdin.isTTY) throw error;
+      console.error('mcodex: First-time setup. Codex will start after the connection is configured.');
       await login({}, directory, controller.signal);
       state = await loadState(directory);
     }
     await resolveNative();
     resolveCodex();
-    tunnel = await startTunnel(state, { signal: controller.signal });
+    tunnel = await connectWithStatus(state, controller.signal);
     if (args[0] === 'doctor') {
       if (args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
       console.log(`mcodex: Node ${process.version}; native transport and official Codex installed.`);
@@ -136,7 +154,9 @@ export async function main(args) {
       return 0;
     }
     if (args[0] === 'codex') args = args.slice(1);
-    return await runCodex(tunnel, args, { model: chooseModel(tunnel.models, state.model), signal: controller.signal });
+    const model = chooseModel(tunnel.models, state.model);
+    if (process.stderr.isTTY) console.error('mcodex: Gateway connected. Starting Codex...');
+    return await runCodex(tunnel, args, { model, signal: controller.signal });
   } finally {
     await tunnel?.close();
     signals.forEach((signal, i) => process.removeListener(signal, handlers[i]));

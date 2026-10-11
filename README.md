@@ -8,11 +8,19 @@
 
 ```sh
 npm install -g @m9rco/mcodex
+mcodex
+```
+
+首次直接运行 `mcodex` 会询问网关地址和连接 Token，验证成功后自动进入 Codex；以后运行 `mcodex` 就会直接连接并启动。Token 输入不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
+
+如果只想提前保存连接设置，可以运行：
+
+```sh
 mcodex login --server wss://gateway.example/mlab-tunnel
 mcodex
 ```
 
-把示例地址换成自己的网关地址。`login` 会交互读取连接 Token；输入内容不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
+把示例地址换成自己的网关地址。`mcodex login` 验证并保存设置后会返回终端；下一条 `mcodex` 才会打开 Codex 交互界面。
 
 如果安装过旧的未加 scope 包，先运行 `npm uninstall -g mcodex`，再安装 `@m9rco/mcodex`，避免同名命令冲突。卸载旧安装包会保留 mcodex 的连接配置。
 
@@ -38,7 +46,7 @@ mcodex exec "解释这个仓库的入口"
 
 | 命令 | 用途 |
 | --- | --- |
-| `mcodex login` | 保存并验证网关地址和连接 Token |
+| `mcodex login` | 保存并验证连接，完成后运行 `mcodex` 打开 Codex |
 | `mcodex doctor` | 检查安装和连接，不发起模型生成 |
 | `mcodex logout` | 清除 mcodex 保存的连接信息 |
 | `mcodex` | 启动官方 Codex 交互界面 |
