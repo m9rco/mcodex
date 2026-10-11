@@ -1,0 +1,7 @@
+node_modules/
+*.tgz
+packages/*/bin/
+coverage/
+.codebase-memory/
+.codegraph/
+.DS_Store

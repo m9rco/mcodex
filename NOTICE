@@ -1,0 +1,20 @@
+mcodex
+Copyright (c) 2026 mlab
+Licensed under the MIT License. See LICENSE.
+
+This distribution uses the official @openai/codex npm package (0.162.1).
+Codex is Copyright OpenAI and is distributed under Apache-2.0.
+Its original license and notices remain in its own npm distribution.
+Source: https://github.com/openai/codex
+
+The optional native packages bundle MLab Gateway, Copyright (c) 2026 mlab,
+under the MIT License. The wrapper invokes only its client transport mode.
+Linux x64 and ARM64 use the public v0.3.2 release assets:
+https://github.com/m9rco/mlab-gateway-client/releases/tag/v0.3.2
+The macOS ARM64 build is from the compatible MLab Gateway v0.3.3 code line.
+Its default example endpoint is gateway.example; the wrapper always supplies
+the user's configured server URL explicitly.
+
+Platform packages record their exact binary SHA-256 in SHA256SUMS and their
+transport version in package.json. Binary installation uses npm tarballs,
+not a postinstall downloader.

@@ -1,0 +1,28 @@
+{
+  "name": "mcodex",
+  "version": "0.1.0",
+  "description": "Run the official Codex CLI through an authenticated persistent gateway, with one-time setup.",
+  "type": "module",
+  "bin": { "mcodex": "bin/mcodex.js" },
+  "engines": { "node": ">=22" },
+  "os": ["linux", "darwin"],
+  "files": ["bin", "src", "README.md", "LICENSE", "NOTICE", "docs/PROPOSAL.md"],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check bin/mcodex.js && node --check src/cli.js && node --check src/tunnel.js",
+    "pack:native": "node scripts/package-native.mjs"
+  },
+  "dependencies": { "@openai/codex": "0.162.1" },
+  "optionalDependencies": {
+    "@m9rco/mcodex-linux-x64": "0.1.0",
+    "@m9rco/mcodex-linux-arm64": "0.1.0",
+    "@m9rco/mcodex-darwin-arm64": "0.1.0"
+  },
+  "repository": { "type": "git", "url": "git+https://github.com/m9rco/mcodex.git" },
+  "bugs": { "url": "https://github.com/m9rco/mcodex/issues" },
+  "homepage": "https://github.com/m9rco/mcodex#readme",
+  "author": "mlab",
+  "license": "MIT",
+  "keywords": ["codex", "cli", "gateway", "mlab"],
+  "publishConfig": { "access": "public" }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@m9rco/mcodex-linux-x64",
+  "version": "0.1.0",
+  "description": "Precompiled MLab Gateway transport for mcodex (linux-x64)",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/mlab-gateway",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "SHA256SUMS"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    "./bin/mlab-gateway": "./bin/mlab-gateway"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m9rco/mcodex.git",
+    "directory": "packages/mcodex-linux-x64"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "mcodex": {
+    "transportVersion": "0.3.2",
+    "binarySha256": "d8c59e9e47623e585016df36c5cc702490b86d3b1270d28b62879048fbd9d2ee"
+  }
+}
