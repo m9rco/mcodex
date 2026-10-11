@@ -14,6 +14,12 @@ mcodex
 
 把示例地址换成自己的网关地址。`login` 会交互读取连接 Token；输入内容不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
 
+也可直接从公开 GitHub Release 安装，适用于 npm 主包尚未发布或需要固定安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
+
+```sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.0/install.sh | sh
+```
+
 自动化环境可以从受保护的文件读取 Token：
 
 ```sh
