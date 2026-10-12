@@ -64,6 +64,9 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
       api_key_file: keyFile,
       server_key_file: state.tokenFile,
       server_url: state.server,
+      // SG may renew OAuth before its 30s inference deadline. Wait longer than
+      // the relay's 90s total budget so its structured error can reach Codex.
+      header_timeout_seconds: 120,
       idle_timeout_seconds: 300,
     };
     await writeFile(configFile, Object.entries(config).map(([name, value]) => `${name} = ${JSON.stringify(value)}`).join('\n') + '\n', { mode: 0o600, flag: 'wx' });
