@@ -27,7 +27,7 @@ mcodex
 也可直接从公开 GitHub Release 安装，适用于固定版本和校验安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.3/install.sh | sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.4/install.sh | sh
 ```
 
 一键脚本会确认旧版全局包和命令属于本项目，再自动替换旧安装；不会使用 `--force` 覆盖其他程序的同名命令。
@@ -90,7 +90,7 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.1.3`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.0`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.1.4`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.0`，npm 根据系统和 CPU 安装对应包。
 
 维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产固定来自已公布的 MLab Gateway `v0.3.2`，下载后校验固定 SHA-256；macOS 包使用提供的 ARM64 可执行文件。脚本不会访问用户连接配置。
 
@@ -102,6 +102,10 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-主包和原生包分别维护版本。`v0.1.3` Release 使用 `m9rco-mcodex-0.1.3.tgz` 与三个已发布的 `0.1.0` 原生 tarball；无需重新发布原生包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+主包和原生包分别维护版本。`v0.1.4` Release 使用 `m9rco-mcodex-0.1.4.tgz` 与三个已发布的 `0.1.0` 原生 tarball；无需重新发布原生包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
 
 连接等待分层：默认 SG 上游响应头预算 30 秒，隧道总预算 90 秒（包含授权刷新），mcodex 客户端预算 120 秒。SG 的超时会返回具体 504 错误；真正断线仍中断当前任务并为后续任务自动重连，不自动重放已提交任务。SG 自定义超时更长时，客户端预算也必须相应增加。
+
+### 延迟检测
+
+运行 `mcodex ping`，通过已配置的 WSS 节点连续发送 5 次鉴权模型目录请求，显示每次耗时、失败次数以及最小/平均/最大耗时。使用 HK 入口时，测量包含 HK→SG 转发及网关处理，不代表纯网络 Ping 或模型生成耗时，不消耗模型生成额度。每次请求最多等待 3 秒；任意请求失败返回退出码 1。连接建立耗时单独显示，包含本地进程启动、TLS、鉴权和首次目录读取。登录及交互启动也会显示连接验证耗时。

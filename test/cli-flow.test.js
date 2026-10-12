@@ -354,3 +354,13 @@ test('a transport failure after login stops Codex and removes temporary state', 
   assert.equal((await events(context)).find(event => event.type === 'codex-stop').signal, 'SIGTERM');
   await assertClean(context);
 });
+
+test('ping measures the configured tunnel without opening Codex and cleans up', async t => {
+  const context = await fixture(t, { configured: true });
+  const result = await run(t, context, ['ping']);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /min\/avg\/max: [\d.]+\/[\d.]+\/[\d.]+ ms/);
+  assert.match(result.stdout, /Failed requests: 0\/5/);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  await assertClean(context, { catalogRequests: 6 });
+});

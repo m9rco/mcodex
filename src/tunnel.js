@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, chmod, writeFile, rm, access } from 'node:fs/promises';
@@ -41,6 +42,7 @@ async function stopProcess(child, exitSignal = 'SIGTERM') {
 }
 
 export async function startTunnel(state, { binary, timeoutMs = 30000, signal } = {}) {
+  const startedAt = performance.now();
   binary ??= await resolveNative();
   const directory = await mkdtemp(path.join(tmpdir(), 'mcodex-'));
   await chmod(directory, 0o700);
@@ -101,7 +103,7 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
           if (response.ok) {
             const data = await response.json();
             if (!Array.isArray(data.data)) throw new Error('The gateway returned an invalid model catalog.');
-            return { origin, key, models: data.data, child, close, directory };
+            return { origin, key, models: data.data, connectionMs: performance.now() - startedAt, child, close, directory };
           }
           await response.body?.cancel();
           if ([401, 403].includes(lastStatus)) throw new Error('Gateway authentication failed. Run mcodex login with a valid connection Token.');
