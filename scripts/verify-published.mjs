@@ -84,19 +84,27 @@ export async function verifyPublished(packages, {
   }
 }
 
-async function main() {
-  const options = { directory: resolve('release'), timeoutMs: 300_000, intervalMs: 5000 };
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i += 2) {
-    const value = args[i + 1];
-    if (!value) throw new Error('Usage: node scripts/verify-published.mjs --directory DIR [--timeout-seconds 300] [--interval-seconds 5]');
-    if (args[i] === '--directory') options.directory = resolve(value);
-    else if (args[i] === '--timeout-seconds') options.timeoutMs = Number(value) * 1000;
-    else if (args[i] === '--interval-seconds') options.intervalMs = Number(value) * 1000;
-    else throw new Error(`Unknown option: ${args[i]}`);
+export function parseOptions(args) {
+  const options = { directory: resolve('release'), timeoutMs: 300_000, intervalMs: 5000, platformsOnly: false };
+  for (let i = 0; i < args.length; i++) {
+    const option = args[i];
+    if (option === '--platforms-only') { options.platformsOnly = true; continue; }
+    if (!['--directory', '--timeout-seconds', '--interval-seconds'].includes(option)) throw new Error(`Unknown option: ${option}`);
+    const value = args[++i];
+    if (!value || value.startsWith('--')) throw new Error('Usage: node scripts/verify-published.mjs --directory DIR [--platforms-only] [--timeout-seconds 300] [--interval-seconds 5]');
+    if (option === '--directory') options.directory = resolve(value);
+    else if (option === '--timeout-seconds') options.timeoutMs = Number(value) * 1000;
+    else options.intervalMs = Number(value) * 1000;
   }
+  return options;
+}
+
+async function main() {
+  const options = parseOptions(process.argv.slice(2));
+  // Always load the full frozen quartet, even before the main package is public.
   const packages = await loadRelease(options.directory);
-  const results = await verifyPublished(packages, { ...options, onProgress: pending => console.error(`Waiting for npm validation/availability: ${pending.join('; ')}`) });
+  const selected = options.platformsOnly ? packages.filter(({ name }) => name !== names[0]) : packages;
+  const results = await verifyPublished(selected, { ...options, onProgress: pending => console.error(`Waiting for npm validation/availability: ${pending.join('; ')}`) });
   for (const result of results) console.log(result);
 }
 

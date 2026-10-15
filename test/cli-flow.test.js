@@ -1,7 +1,8 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { saveState } from '../src/state.js';
 
 const source = fileURLToPath(new URL('..', import.meta.url));
-const server = 'wss://test.invalid/tunnel';
+// Optional HTTPS telemetry must fail locally rather than depend on external DNS.
+// This plain HTTP fixture immediately rejects TLS, while inference uses the
+// separate authenticated transport fixture below.
+const relayFixture = createServer();
+relayFixture.on('clientError', (_error, socket) => socket.destroy());
+await new Promise(resolve => relayFixture.listen(0, '127.0.0.1', resolve));
+const server = `wss://127.0.0.1:${relayFixture.address().port}/tunnel`;
+after(() => new Promise(resolve => { relayFixture.closeAllConnections(); relayFixture.close(resolve); }));
 const token = 'cli-flow-dummy-connection-token-1234567890';
 const codexOutput = '{"type":"fixture_codex_started"}\n';
 

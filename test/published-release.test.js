@@ -2,7 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { verifyPublished } from '../scripts/verify-published.mjs';
+import { resolve } from 'node:path';
+import { parseOptions, verifyPublished } from '../scripts/verify-published.mjs';
+
+test('platform-only gate flag can precede or follow value options without consuming them', () => {
+  for (const args of [
+    ['--platforms-only', '--directory', '/tmp/frozen-release', '--timeout-seconds', '20'],
+    ['--directory', '/tmp/frozen-release', '--platforms-only', '--timeout-seconds', '20'],
+  ]) {
+    const options = parseOptions(args);
+    assert.equal(options.platformsOnly, true);
+    assert.equal(options.directory, resolve('/tmp/frozen-release'));
+    assert.equal(options.timeoutMs, 20_000);
+  }
+  assert.equal(parseOptions([]).platformsOnly, false);
+  assert.throws(() => parseOptions(['--directory', '--platforms-only']), /Usage:/);
+  assert.throws(() => parseOptions(['--unknown']), /Unknown option/);
+});
 
 async function registryFixture(t, { availableAfter = 0, wrongArtifact = false } = {}) {
   const artifact = Buffer.from('frozen reviewed tarball fixture');
