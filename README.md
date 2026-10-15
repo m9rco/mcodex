@@ -106,6 +106,8 @@ npm pack
 
 主包和原生包分别维护版本。`v0.1.5` Release 使用 `m9rco-mcodex-0.1.5.tgz` 与三个 `0.1.1` 原生 tarball；该版本需要更新原生包以获得心跳 RTT 诊断。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
 
+npm 发布后需等待公开下载并校验冻结 tarball，不能以提交回执或两步验证完成作为发行成功。运行 `node scripts/verify-published.mjs --directory <冻结目录>`；有限等待和状态排查方法见 [发布后验证](docs/RELEASE-VERIFICATION.md)。
+
 连接等待分层：默认 SG 上游响应头预算 30 秒，隧道总预算 90 秒（包含授权刷新），mcodex 客户端预算 120 秒。SG 的超时会返回具体 504 错误；真正断线仍中断当前任务并为后续任务自动重连，不自动重放已提交任务。SG 自定义超时更长时，客户端预算也必须相应增加。
 
 ### 延迟检测

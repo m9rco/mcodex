@@ -56,3 +56,15 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 - 经 HK 中转的固定官方 Codex 真实本机文件读取已准确返回临时文件内的随机标记，升级前后均通过（原生 client 0.3.5，升级后 server 0.3.5）。
 
 当前支持范围是固定版本 Codex 的自定义 Responses HTTP/SSE 提供商；自定义持续 WSS 隧道不等同于原生 Responses WebSocket。模拟验收覆盖大文本、SSE、本地压缩、resume、取消并丢弃上游及无请求重放；上游不提供官方远程压缩端点时，固定 CLI 使用本地压缩。原生 Linux ARM64 Docker 从冻结 0.1.5/0.1.1 tarball 完成安装、鉴权、WSS RTT/逐跳探针及真实本机文件工具验证；x64 在 QEMU 下完成同版本安装、鉴权、WSS/逐跳检测，未据此声明 x64 原生工具或性能验收。ARM64 容器仅为嵌套 Codex 沙箱增加 CAP_SYS_ADMIN、放开容器 seccomp/AppArmor，没有宿主目录挂载。公开 gateway client v0.3.5 的匿名一键安装也在 ARM64 Docker 通过，初次下载出现两次连接超时后按安装器既有重试成功。真实长时间上下文、多任务工具和原生 x64 工具仍需各自验收，不能由上述模拟或单次工具通过推断。1 MiB 单请求边界和订阅访问资格仍适用；不宣称所有未来 Codex 版本与功能完整兼容。
+
+## 0.1.5 公开安装与发布校验补记
+
+2026-10-15，已发布的 v0.1.5 标签与安装资产保持冻结，以下为发行后的补充验收。
+
+- GitHub v0.1.5 的六个公开资产 SHA-256 digest 与冻结文件一致。
+- 主包 0.1.5、Linux ARM64 和 Mac ARM64 原生包 0.1.1 的匿名 metadata、latest 标签及下载 SHA-512 与冻结 tarball 一致。Linux x64 0.1.1 在核对时由 npm 状态接口返回 `validating`，公开 metadata 与 tarball 尚不可用，不能把 HTTP 409 或提交回执作为成功。
+- 干净 Linux ARM64 Docker 匿名从 npm 安装主包 0.1.5，自动获得 native 0.3.5，真实 HK 登录、模型目录与 doctor 遥测通过。
+- 公开 GitHub 安装脚本在 x64 QEMU Docker 完成 0.1.4 到 0.1.5 升级，连接配置和 Token 文件哈希保持一致；该结果不属于 npm x64 安装验收。
+- 增加匿名四包发布校验脚本及三个真实 HTTP fixture 回归用例。包装器完整测试 65 项通过；校验脚本的真实发行目录检查能准确指出 x64 尚未公开并在时限内失败。
+
+发行检查方法见 [发布后验证](RELEASE-VERIFICATION.md)。测试容器已删除，未保留测试连接凭据。
