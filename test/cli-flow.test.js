@@ -84,16 +84,18 @@ const config = Object.fromEntries(readFileSync(configFile, 'utf8').trim().split(
   return [line.slice(0, at), JSON.parse(line.slice(at + 3))];
 }));
 const key = readFileSync(config.api_key_file, 'utf8').trim();
-record({ type: 'transport-start', pid: process.pid, server: config.server_url, runtimeDirectory: path.dirname(configFile), candidateDirectory: path.dirname(config.server_key_file) });
+record({ type: 'transport-start', pid: process.pid, server: config.server_url, runtimeDirectory: path.dirname(configFile), candidateDirectory: path.dirname(config.server_key_file), connectionTokenMatches: readFileSync(config.server_key_file, 'utf8').trim() === ${JSON.stringify(token)} });
+let catalogCount = 0;
 const server = http.createServer((request, response) => {
   const authenticated = request.headers.authorization === 'Bearer ' + key;
-  record({ type: request.url === '/diagnostics' ? 'diagnostics-request' : 'catalog-request', authenticated });
+  record({ type: request.url === '/diagnostics' ? 'diagnostics-request' : 'catalog-request', server: config.server_url, authenticated });
   if (request.url === '/diagnostics') {
     if (${JSON.stringify(diagnostics)} === 'blocked') return;
     response.writeHead(${JSON.stringify(diagnostics)} === 'legacy' ? 404 : 200);
     response.end(${JSON.stringify(diagnostics)} === 'malformed' ? '{"schema_version":1,"connected":true,"hops":null}' : ''); return;
   }
-  if (${JSON.stringify(transport)} === 'blocked') return;
+  catalogCount++;
+  if (${JSON.stringify(transport)} === 'blocked' || (${JSON.stringify(transport)} === 'probe-blocked' && catalogCount > 1)) return;
   response.writeHead(authenticated && ${JSON.stringify(transport)} !== 'unauthorized' ? 200 : 401, { 'Content-Type': 'application/json' });
   response.end(JSON.stringify({ data: [{ id: 'test-model' }] }));
 });
@@ -204,7 +206,8 @@ async function run(t, context, args, { terminal = false, setup = false, interrup
     const list = await waitFor(`fixture ${interruptAt}`, async () => {
       const list = await events(context);
       const expected = interruptAt === 'catalog' ? 'catalog-request' : interruptAt === 'diagnostics' ? 'diagnostics-request' : 'codex-ready';
-      const ready = list.some(event => event.type === expected);
+      const ready = interruptAt === 'paired-probe' ? list.filter(event => event.type === 'catalog-request').length >= 3
+        : list.some(event => event.type === expected);
       return ready ? list : undefined;
     });
     const transport = list.find(event => event.type === 'transport-start');
@@ -226,6 +229,7 @@ async function assertClean(context, { starts = 1, catalogRequests = 1 } = {}) {
   assert.equal(transports.length, starts, 'verified setup and Codex must reuse one transport process');
   if (catalogRequests !== undefined) assert.equal(list.filter(event => event.type === 'catalog-request').length, catalogRequests);
   assert.equal(list.filter(event => event.type === 'catalog-request').every(event => event.authenticated), true);
+  assert.equal(transports.every(event => event.connectionTokenMatches), true, 'all temporary endpoints must reuse the original private connection key');
   for (const entry of list.filter(event => ['transport-start', 'codex-start'].includes(event.type))) {
     assert.equal(isRunning(entry.pid), false, `${entry.type} must stop before the wrapper exits`);
   }
@@ -400,26 +404,89 @@ test('malformed optional diagnostics do not prevent interactive Codex startup', 
 
 test('route comparison launches two independent authenticated transports and cleans both', async t => {
   const context = await fixture(t, { configured: true });
-  const compared = 'wss://compare.test.invalid/mlab-tunnel';
+  const comparedUrl = new URL('/comparison', server);
+  comparedUrl.hostname = '127.0.0.2';
+  const compared = comparedUrl.href;
   const result = await run(t, context, ['ping', '--compare', compared]);
   assert.equal(result.code, 0);
   const started = (await events(context)).filter(event => event.type === 'transport-start');
   assert.deepEqual(started.map(event => event.server), [server, compared]);
-  assert.match(result.stdout, /Configured route:/);
-  assert.match(result.stdout, /Compared route:/);
+  assert.match(result.stdout, /Baseline 127\.0\.0\.1:\d+: setup \d+ ms;/);
+  assert.match(result.stdout, /Comparison 127\.0\.0\.2:\d+: setup \d+ ms;/);
+  assert.doesNotMatch(result.stdout, /^\d+: \d+\.\d+ ms$/m);
+  assert.doesNotMatch(result.stdout, /^min\/avg\/max:/m);
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
-  await assertClean(context, { starts: 2, catalogRequests: 17 });
+  const list = await assertClean(context, { starts: 2, catalogRequests: 12 });
+  assert.deepEqual(list.filter(event => event.type === 'catalog-request').slice(2).map(event => event.server),
+    [server, compared, compared, server, server, compared, compared, server, server, compared]);
 });
 
-test('invalid or duplicate comparison endpoints fail before any transport starts', async t => {
+test('same endpoint comparison creates two transports and reports connection variation', async t => {
   const context = await fixture(t, { configured: true });
-  for (const endpoint of [server, 'http://test.invalid', 'wss://user:fixture-secret@test.invalid', 'wss://test.invalid?token=fixture-secret']) {
-    const result = await run(t, context, ['ping', '--compare', endpoint]);
+  const before = await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8')));
+  const result = await run(t, context, ['ping', '--compare', server], { terminal: true });
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Same endpoint, two independent connections:.*connection variation/);
+  assert.doesNotMatch(result.stdout, /changing routes|min\/avg\/max:/);
+  assert.doesNotMatch(result.stderr, /Starting Codex|WSS heartbeat RTT|Per-hop probe/);
+  const list = await assertClean(context, { starts: 2, catalogRequests: 12 });
+  assert.deepEqual(list.filter(event => event.type === 'transport-start').map(event => event.server), [server, server]);
+  assert.deepEqual(await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8'))), before);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+});
+
+for (const option of ['positional', '--server']) {
+  test(`ping ${option} target only overrides the endpoint temporarily`, async t => {
+    const context = await fixture(t, { configured: true });
+    const target = new URL('/target-only', server).href;
+    const before = await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8')));
+    const result = await run(t, context, ['ping', ...(option === 'positional' ? [target] : ['--server', target])]);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Failed requests: 0\/5/);
+    assert.doesNotMatch(result.stdout, /Comparing|Comparison .*setup/);
+    const list = await assertClean(context, { catalogRequests: 6 });
+    assert.equal(list.find(event => event.type === 'transport-start').server, target);
+    assert.deepEqual(await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8'))), before);
+    await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  });
+}
+
+test('explicit baseline and comparison both override saved route without replacing settings', async t => {
+  const context = await fixture(t, { configured: true });
+  const baseline = new URL('/explicit-baseline', server).href;
+  const compared = new URL('/explicit-comparison', server).href;
+  const before = await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8')));
+  const result = await run(t, context, ['ping', '--server', baseline, '--compare', compared]);
+  assert.equal(result.code, 0);
+  const list = await assertClean(context, { starts: 2, catalogRequests: 12 });
+  assert.deepEqual(list.filter(event => event.type === 'transport-start').map(event => event.server), [baseline, compared]);
+  assert.deepEqual(await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8'))), before);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+});
+
+test('invalid or duplicate ping endpoints fail before any transport starts', async t => {
+  const context = await fixture(t, { configured: true });
+  const invalid = ['http://test.invalid', 'wss://user:fixture-secret@test.invalid', 'wss://test.invalid?token=fixture-secret', 'wss://test.invalid#fixture-secret'];
+  const inputs = invalid.flatMap(endpoint => [[endpoint], ['--server', endpoint], ['--compare', endpoint]]);
+  inputs.push(['--server', server, server], [server, '--server', server], ['--compare', server, '--compare', server]);
+  for (const args of inputs) {
+    const result = await run(t, context, ['ping', ...args]);
     assert.equal(result.code, 1);
     assert.equal(result.stdout, '');
     assert.equal(result.stderr.includes('fixture-secret'), false);
   }
   assert.equal((await events(context)).length, 0);
+});
+
+test('cancelling a paired comparison stops both transports and leaves saved settings intact', async t => {
+  const context = await fixture(t, { configured: true, transport: 'probe-blocked' });
+  const before = await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8')));
+  const result = await run(t, context, ['ping', '--compare', server], { interruptAt: 'paired-probe' });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Interrupted by SIGTERM/);
+  await assertClean(context, { starts: 2, catalogRequests: 3 });
+  assert.deepEqual(await Promise.all(['config.json', 'server.key'].map(name => readFile(path.join(context.config, name), 'utf8'))), before);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
 });
 
 test('cancellation during optional startup diagnostics cleans transport without launching Codex', async t => {

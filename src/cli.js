@@ -8,13 +8,13 @@ import { promptText } from './prompt.js';
 import { chooseModel } from './provider.js';
 import { resolveNative, resolveCodex, startTunnel, runCodex } from './tunnel.js';
 
-export const help = `mcodex 0.1.5 — official Codex with automatic gateway setup
+export const help = `mcodex 0.1.6 — official Codex with automatic gateway setup
 
 Usage:
   mcodex [Codex arguments]           Start Codex; first run asks for connection settings
   mcodex exec [Codex exec arguments] Run the official Codex non-interactively
   mcodex login [options]             Verify the connection and open Codex in a terminal
-  mcodex ping [--compare <WSS URL>]  Measure latency; optionally compare another gateway route
+  mcodex ping [<WSS URL>] [options] Measure a saved or specified gateway; optionally compare two connections
   mcodex doctor                     Check dependencies, connection and available models
   mcodex logout                     Delete mcodex connection settings
   mcodex codex [arguments]           Pass a reserved command through to official Codex
@@ -25,6 +25,12 @@ Login options:
   --token-file <path>        Read the connection Token from a file
   --model <id>               Select an available default model
   --no-launch                Save the connection without opening Codex
+
+Ping options:
+  --server <wss://host/path>  Measure this endpoint without changing saved settings
+  --compare <wss://host/path> Compare two independent connections, including the same endpoint
+
+Ping uses your saved connection Token; endpoint overrides are temporary.
 
 npm install -g @m9rco/mcodex
 mcodex
@@ -75,7 +81,7 @@ async function stdinToken(signal) {
   }
 }
 
-async function connectWithStatus(state, signal) {
+async function connectWithStatus(state, signal, { telemetry = true } = {}) {
   if (!process.stderr.isTTY) return startTunnel(state, { signal });
   console.error('mcodex: Connecting to the gateway...');
   const progress = setInterval(() => {
@@ -86,6 +92,7 @@ async function connectWithStatus(state, signal) {
     const tunnel = await startTunnel(state, { signal });
     console.error(`mcodex: Connection verified in ${tunnel.connectionMs.toFixed(0)} ms (includes startup and authentication).`);
     try {
+      if (!telemetry) return tunnel;
       tunnel.telemetrySnapshot = await collectTelemetry(tunnel, state, { signal });
       formatTelemetry(tunnel.telemetrySnapshot).forEach(line => console.error(`mcodex: ${line}`));
     } catch (error) {
@@ -139,7 +146,7 @@ export async function main(args) {
     return 0;
   }
   if (args[0] === '--version' || args[0] === '-V') {
-    console.log('mcodex 0.1.5 (official Codex 0.162.1)');
+    console.log('mcodex 0.1.6 (official Codex 0.162.1)');
     return 0;
   }
   const directory = stateDirectory();
@@ -163,6 +170,7 @@ export async function main(args) {
       const launch = !options.noLaunch && process.stdin.isTTY && process.stdout.isTTY;
       return await login(options, directory, controller.signal, launch ? [] : undefined);
     }
+    const ping = args[0] === 'ping' ? parsePing(args.slice(1)) : undefined;
     let state;
     try { state = await loadState(directory); }
     catch (error) {
@@ -170,13 +178,34 @@ export async function main(args) {
       console.error('mcodex: First-time setup. Codex will start after the connection is configured.');
       return await login({}, directory, controller.signal, args[0] === 'codex' ? args.slice(1) : args);
     }
-    const ping = args[0] === 'ping' ? parsePing(args.slice(1)) : undefined;
-    if (ping?.compare === state.server) throw new Error('Choose a different WSS endpoint for comparison.');
+    if (ping?.server) state = { ...state, server: ping.server };
     if (args[0] === 'doctor' && args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
     await resolveNative();
     if (args[0] !== 'ping') resolveCodex();
-    tunnel = await connectWithStatus(state, controller.signal);
+    tunnel = await connectWithStatus(state, controller.signal, { telemetry: args[0] !== 'ping' });
     if (args[0] === 'ping') {
+      if (ping.compare) {
+        let candidate;
+        try {
+          console.log(`mcodex: Comparing ${new URL(state.server).host} and ${new URL(ping.compare).host}: two independent connections, 5 alternating paired probes; same saved connection Token.`);
+          const candidateState = { ...state, server: ping.compare };
+          candidate = await startTunnel(candidateState, { signal: controller.signal });
+          const comparison = await compareRoutes(tunnel, candidate, { probe: measureLatency, signal: controller.signal });
+          formatComparison(comparison, { currentServer: state.server, candidateServer: ping.compare,
+            currentSetupMs: tunnel.connectionMs, candidateSetupMs: candidate.connectionMs }).forEach(line => console.log(line));
+          const snapshots = await Promise.all([
+            collectTelemetry(tunnel, state, { signal: controller.signal }),
+            collectTelemetry(candidate, candidateState, { signal: controller.signal }),
+          ]);
+          for (const [index, label] of ['Baseline', 'Comparison'].entries()) {
+            const host = new URL(index === 0 ? state.server : ping.compare).host;
+            formatTelemetry(snapshots[index]).forEach(line => console.log(`${label} ${host}: ${line}`));
+          }
+          return comparison.current.failed || comparison.candidate.failed ? 1 : 0;
+        } finally {
+          await candidate?.close();
+        }
+      }
       console.log(`mcodex: ${new URL(state.server).host}; authenticated requests over WSS (includes relay and gateway processing).`);
       console.log(`Connection setup: ${tunnel.connectionMs.toFixed(0)} ms`);
       const result = await measureLatency(tunnel, { signal: controller.signal });
@@ -185,18 +214,6 @@ export async function main(args) {
       if (result.average !== null) console.log(`min/avg/max: ${result.min.toFixed(1)}/${result.average.toFixed(1)}/${result.max.toFixed(1)} ms`);
       const snapshot = await collectTelemetry(tunnel, state, { signal: controller.signal });
       formatTelemetry(snapshot).forEach(line => console.log(line));
-      if (ping.compare) {
-        let candidate;
-        try {
-          console.log(`Comparing with ${new URL(ping.compare).host} using the same connection Token.`);
-          candidate = await startTunnel({ ...state, server: ping.compare }, { signal: controller.signal });
-          const comparison = await compareRoutes(tunnel, candidate, { probe: measureLatency, signal: controller.signal });
-          formatComparison(comparison).forEach(line => console.log(line));
-          if (comparison.current.failed || comparison.candidate.failed) return 1;
-        } finally {
-          await candidate?.close();
-        }
-      }
       return result.failed ? 1 : 0;
     }
     if (args[0] === 'doctor') {
