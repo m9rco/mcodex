@@ -27,7 +27,7 @@ mcodex
 也可直接从公开 GitHub Release 安装，适用于固定版本和校验安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.4/install.sh | sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.5/install.sh | sh
 ```
 
 一键脚本会确认旧版全局包和命令属于本项目，再自动替换旧安装；不会使用 `--force` 覆盖其他程序的同名命令。
@@ -49,6 +49,8 @@ mcodex exec "解释这个仓库的入口"
 | `mcodex login` | 在终端验证并保存连接，成功后直接进入 Codex |
 | `mcodex login --no-launch` | 只验证并保存连接 |
 | `mcodex doctor` | 检查安装和连接，不发起模型生成 |
+| `mcodex ping` | 检测请求耗时、WSS 心跳 RTT 和逐跳观测 |
+| `mcodex ping --compare <WSS URL>` | 从当前机房比较两个属于同一网关的入口 |
 | `mcodex logout` | 清除 mcodex 保存的连接信息 |
 | `mcodex` | 启动官方 Codex 交互界面 |
 | `mcodex exec "..."` | 执行官方 Codex 非交互任务 |
@@ -67,7 +69,7 @@ flowchart LR
 
 Codex 的文件访问、命令执行和工具调用发生在运行 `mcodex` 的机器上。Node.js 只处理设置和进程管理；模型请求及流式响应仍由 Rust 转发。每次运行会自动建立连接，退出后停止本机转发进程并清理临时密钥。
 
-mcodex 使用本机随机端口和临时 API Key，通过官方 Codex 的自定义模型提供商配置连接网关。它不修改 `HOME`、`CODEX_HOME`，也不改写已有的 Codex 配置。远端连接 Token 不传给 Codex 子进程。
+mcodex 使用本机随机端口和临时 API Key，通过官方 Codex 的自定义模型提供商配置连接网关。它不修改 `HOME`、`CODEX_HOME`，也不改写已有的 Codex 配置。远端连接 Token 不传给 Codex 子进程。为保证 Codex 的本机请求直达转发端口，它只在 Codex 子进程中合并原有 `NO_PROXY`/`no_proxy` 排除项并追加 `127.0.0.1,localhost,::1`；已有 HTTP/SOCKS 代理变量和原生转发进程的上游代理保持原设置。
 
 连接信息保存在 `${XDG_CONFIG_HOME:-~/.config}/mcodex`，目录权限为 `0700`，配置和密钥文件权限为 `0600`。mcodex 首次设置时读取你的网关地址，发布包不包含连接 Token。
 
@@ -90,9 +92,9 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.1.4`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.0`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.1.5`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.1`，npm 根据系统和 CPU 安装对应包。
 
-维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产固定来自已公布的 MLab Gateway `v0.3.2`，下载后校验固定 SHA-256；macOS 包使用提供的 ARM64 可执行文件。脚本不会访问用户连接配置。
+维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.3.5`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
 
 ```sh
 node scripts/package-native.mjs --darwin-binary /path/to/mlab-gateway
@@ -102,10 +104,18 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-主包和原生包分别维护版本。`v0.1.4` Release 使用 `m9rco-mcodex-0.1.4.tgz` 与三个已发布的 `0.1.0` 原生 tarball；无需重新发布原生包。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+主包和原生包分别维护版本。`v0.1.5` Release 使用 `m9rco-mcodex-0.1.5.tgz` 与三个 `0.1.1` 原生 tarball；该版本需要更新原生包以获得心跳 RTT 诊断。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
 
 连接等待分层：默认 SG 上游响应头预算 30 秒，隧道总预算 90 秒（包含授权刷新），mcodex 客户端预算 120 秒。SG 的超时会返回具体 504 错误；真正断线仍中断当前任务并为后续任务自动重连，不自动重放已提交任务。SG 自定义超时更长时，客户端预算也必须相应增加。
 
 ### 延迟检测
 
 运行 `mcodex ping`，通过已配置的 WSS 节点连续发送 5 次鉴权模型目录请求，显示每次耗时、失败次数以及最小/平均/最大耗时。使用 HK 入口时，测量包含 HK→SG 转发及网关处理，不代表纯网络 Ping 或模型生成耗时，不消耗模型生成额度。每次请求最多等待 3 秒；任意请求失败返回退出码 1。连接建立耗时单独显示，包含本地进程启动、TLS、鉴权和首次目录读取。登录及交互启动也会显示连接验证耗时。
+
+原生客户端的心跳 RTT 来源于同一条持续 WSS 连接的匹配 Ping/Pong，保留最近 32 个样本及其年龄，重连后清空。它包含所有中继和控制消息排队。`ping`、`doctor` 和交互启动使用同一遥测快照；未知、旧版原生包或暂时检测失败都显示为不可用，不把它们当成 0，也不阻断已验证的 Codex 连接。诊断只读取目录/健康状态，不能代替真实生成或工具验收。
+
+如果入口配置了受鉴权的 `/mlab-probe`，还会显示 client→入口的 TCP 和 TLS 建连耗时，以及每个中继独立提供的下游响应头时间（TTFB）、可选的相邻 TCP/TLS 建连时间。最多 8 个连续跳段；样本数量与年龄单独显示。`downstream_header_ms` 来自 nginx 的 `$upstream_header_time`，包含到达下游健康响应头前的 TCP/TLS、其后中继和处理时间，属于累计量，不能把多跳时间相加，也不能与 WSS RTT 相减推算单跳网络 RTT。它不等同于完整响应传输耗时。nginx 的计时分辨率为 1 ms，测得 0 表示低于分辨率。探针禁止重定向，连接 Token 只发送到配置的、证书验证通过的入口。
+
+### 路径比较
+
+`mcodex ping --compare wss://sg.0x06.cn/mlab-tunnel` 可从实际机房比较当前配置的 HK 入口与 SG 直连。它使用当前连接 Token 验证你明确指定的第二个 TLS 入口，建立两个独立隧道、交替发送只读探针，并报告平均请求耗时和失败数，不自动改配置或重放生成。请只比较属于你的同一网关的入口，不向不受信任的服务器发送连接凭据。建连耗时与稳定请求耗时不同，最少广域跳数也不等于最快路径。

@@ -121,13 +121,24 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
   }
 }
 
+// The official CLI may honor system proxy settings even for the loopback
+// facade. Scope the bypass to its child process; keep native upstream routing
+// and all existing user exclusions intact, including both spelling variants.
+export function codexEnvironment(localKey, env = process.env) {
+  const exclusions = new Set([env.NO_PROXY, env.no_proxy]
+    .flatMap(value => typeof value === 'string' ? value.split(',').map(entry => entry.trim()).filter(Boolean) : []));
+  for (const host of ['127.0.0.1', 'localhost', '::1']) exclusions.add(host);
+  const bypass = [...exclusions].join(',');
+  return { ...env, MCODEX_LOCAL_KEY: localKey, NO_PROXY: bypass, no_proxy: bypass };
+}
+
 export async function runCodex(tunnel, args, { model, codexEntry = resolveCodex(), signal } = {}) {
   const { providerArguments } = await import('./provider.js');
   signal?.throwIfAborted();
   if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error('The native transport stopped before Codex could start.');
   const child = spawn(process.execPath, [codexEntry, ...providerArguments({ origin: tunnel.origin, model }), ...args], {
     stdio: 'inherit',
-    env: { ...process.env, MCODEX_LOCAL_KEY: tunnel.key },
+    env: codexEnvironment(tunnel.key),
   });
   let transportFailed = false;
   let stopping;

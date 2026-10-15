@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +40,7 @@ function isRunning(pid) {
   }
 }
 
-async function fixture(t, { configured = false, transport = 'normal', codexHolds = false } = {}) {
+async function fixture(t, { configured = false, transport = 'normal', codexHolds = false, diagnostics = 'legacy', proxyEnv = {} } = {}) {
   const directory = await mkdtemp('/tmp/mcodex-cli-flow-');
   const context = { directory, events: path.join(directory, 'events.jsonl') };
   t.after(async () => {
@@ -75,10 +76,15 @@ const config = Object.fromEntries(readFileSync(configFile, 'utf8').trim().split(
   return [line.slice(0, at), JSON.parse(line.slice(at + 3))];
 }));
 const key = readFileSync(config.api_key_file, 'utf8').trim();
-record({ type: 'transport-start', pid: process.pid, runtimeDirectory: path.dirname(configFile), candidateDirectory: path.dirname(config.server_key_file) });
+record({ type: 'transport-start', pid: process.pid, server: config.server_url, runtimeDirectory: path.dirname(configFile), candidateDirectory: path.dirname(config.server_key_file) });
 const server = http.createServer((request, response) => {
   const authenticated = request.headers.authorization === 'Bearer ' + key;
-  record({ type: 'catalog-request', authenticated });
+  record({ type: request.url === '/diagnostics' ? 'diagnostics-request' : 'catalog-request', authenticated });
+  if (request.url === '/diagnostics') {
+    if (${JSON.stringify(diagnostics)} === 'blocked') return;
+    response.writeHead(${JSON.stringify(diagnostics)} === 'legacy' ? 404 : 200);
+    response.end(${JSON.stringify(diagnostics)} === 'malformed' ? '{"schema_version":1,"connected":true,"hops":null}' : ''); return;
+  }
   if (${JSON.stringify(transport)} === 'blocked') return;
   response.writeHead(authenticated && ${JSON.stringify(transport)} !== 'unauthorized' ? 200 : 401, { 'Content-Type': 'application/json' });
   response.end(JSON.stringify({ data: [{ id: 'test-model' }] }));
@@ -102,12 +108,15 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
 
   const config = path.join(directory, 'config');
   const record = path.join(directory, 'handoff.json');
-  const env = { ...process.env, MCODEX_CONFIG_DIR: config };
+  const env = { ...process.env, ...proxyEnv, MCODEX_CONFIG_DIR: config };
+  const proxyHashes = Object.fromEntries(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']
+    .map(name => [name, env[name] === undefined ? null : createHash('sha256').update(env[name]).digest('hex')]));
   const codex = path.join(application, 'node_modules', '@openai', 'codex');
   await mkdir(path.join(codex, 'bin'), { recursive: true });
   await writeFile(path.join(codex, 'package.json'), JSON.stringify({ name: '@openai/codex', type: 'module' }));
   await writeFile(path.join(codex, 'bin', 'codex.js'), `
 import { appendFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 const baseKeys = new Set(${JSON.stringify(Object.keys(env))});
 const token = ${JSON.stringify(token)};
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({
@@ -117,6 +126,9 @@ writeFileSync(${JSON.stringify(record)}, JSON.stringify({
   connectionTokenInEnvironment: Object.values(process.env).some(value => value.includes(token)),
   hasLocalKey: Boolean(process.env.MCODEX_LOCAL_KEY),
   localKeyIsConnectionToken: process.env.MCODEX_LOCAL_KEY === token,
+  proxyBypass: { uppercase: process.env.NO_PROXY, lowercase: process.env.no_proxy },
+  inheritedProxyUnchanged: Object.entries(${JSON.stringify(proxyHashes)}).every(([name, expected]) =>
+    (process.env[name] === undefined ? null : createHash('sha256').update(process.env[name]).digest('hex')) === expected),
 }));
 const event = value => appendFileSync(${JSON.stringify(context.events)}, JSON.stringify(value) + '\\n', { mode: 0o600 });
 event({ type: 'codex-start', pid: process.pid });
@@ -183,7 +195,8 @@ async function run(t, context, args, { terminal = false, setup = false, interrup
   if (interruptAt) action = (async () => {
     const list = await waitFor(`fixture ${interruptAt}`, async () => {
       const list = await events(context);
-      const ready = list.some(event => event.type === (interruptAt === 'catalog' ? 'catalog-request' : 'codex-ready'));
+      const expected = interruptAt === 'catalog' ? 'catalog-request' : interruptAt === 'diagnostics' ? 'diagnostics-request' : 'codex-ready';
+      const ready = list.some(event => event.type === expected);
       return ready ? list : undefined;
     });
     const transport = list.find(event => event.type === 'transport-start');
@@ -228,7 +241,12 @@ async function assertHandoff(context, result, code = 17) {
   assert.equal(result.code, code, 'the wrapper must preserve the official CLI exit status');
   assert.equal(result.stdout, codexOutput, 'wrapper status must not add anything to Codex stdout');
   const child = JSON.parse(await readFile(context.record, 'utf8'));
-  assert.deepEqual(child.addedEnvironmentKeys, ['MCODEX_LOCAL_KEY'], 'status must not introduce child environment variables');
+  const allowed = ['MCODEX_LOCAL_KEY', 'NO_PROXY', 'no_proxy'];
+  assert.equal(child.addedEnvironmentKeys.every(key => allowed.includes(key)), true, 'only local authentication and loopback proxy exclusions may be introduced');
+  assert.deepEqual(child.addedEnvironmentKeys, allowed.filter(key => !Object.hasOwn(context.env, key)).sort());
+  assert.equal(child.proxyBypass.uppercase, child.proxyBypass.lowercase);
+  for (const host of ['127.0.0.1', 'localhost', '::1']) assert.ok(child.proxyBypass.uppercase.split(',').includes(host));
+  assert.equal(child.inheritedProxyUnchanged, true);
   assert.equal(child.connectionTokenInEnvironment, false);
   assert.equal(child.localKeyIsConnectionToken, false);
   assert.equal(child.hasLocalKey, true);
@@ -363,4 +381,55 @@ test('ping measures the configured tunnel without opening Codex and cleans up', 
   assert.match(result.stdout, /Failed requests: 0\/5/);
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
   await assertClean(context, { catalogRequests: 6 });
+});
+
+test('malformed optional diagnostics do not prevent interactive Codex startup', async t => {
+  const context = await fixture(t, { configured: true, diagnostics: 'malformed' });
+  const result = await run(t, context, [], { terminal: true });
+  await assertHandoff(context, result);
+  assert.match(result.stderr, /telemetry unavailable \(probe failed\)/);
+});
+
+test('route comparison launches two independent authenticated transports and cleans both', async t => {
+  const context = await fixture(t, { configured: true });
+  const compared = 'wss://compare.test.invalid/mlab-tunnel';
+  const result = await run(t, context, ['ping', '--compare', compared]);
+  assert.equal(result.code, 0);
+  const started = (await events(context)).filter(event => event.type === 'transport-start');
+  assert.deepEqual(started.map(event => event.server), [server, compared]);
+  assert.match(result.stdout, /Configured route:/);
+  assert.match(result.stdout, /Compared route:/);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  await assertClean(context, { starts: 2, catalogRequests: 17 });
+});
+
+test('invalid or duplicate comparison endpoints fail before any transport starts', async t => {
+  const context = await fixture(t, { configured: true });
+  for (const endpoint of [server, 'http://test.invalid', 'wss://user:fixture-secret@test.invalid', 'wss://test.invalid?token=fixture-secret']) {
+    const result = await run(t, context, ['ping', '--compare', endpoint]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.includes('fixture-secret'), false);
+  }
+  assert.equal((await events(context)).length, 0);
+});
+
+test('cancellation during optional startup diagnostics cleans transport without launching Codex', async t => {
+  const context = await fixture(t, { configured: true, diagnostics: 'blocked' });
+  const result = await run(t, context, [], { terminal: true, interruptAt: 'diagnostics' });
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Interrupted by SIGTERM/);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  await assertClean(context);
+});
+
+test('actual Codex child preserves inherited proxy settings and merges uppercase and lowercase bypass lists', async t => {
+  const context = await fixture(t, { configured: true, proxyEnv: {
+    NO_PROXY: 'upper.example,localhost', no_proxy: 'lower.example,upper.example',
+    HTTPS_PROXY: 'http://fixture-proxy.invalid:8888', http_proxy: 'http://fixture-proxy.invalid:8889',
+  } });
+  const result = await run(t, context, ['exec', '--json', 'fixture prompt']);
+  const child = await assertHandoff(context, result);
+  assert.equal(child.proxyBypass.uppercase, 'upper.example,localhost,lower.example,127.0.0.1,::1');
 });

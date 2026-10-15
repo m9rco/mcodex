@@ -43,3 +43,16 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 ## 0.1.3 超时预算修复
 
 客户端响应头等待增加到 120 秒，长于默认 SG 的 90 秒隧道预算；原生平台包仍为 0.1.0。配合 SG 0.3.4，后端响应超时会保留为结构化 504，而非被外层抢先终止并误报为连接中断 503。连接断开后的任务不自动重放。
+
+## 0.1.5 遥测与兼容性验收
+
+2026-10-15，主包 0.1.5、三平台原生包 0.1.1，固定官方 Codex 0.162.1、gateway 0.3.5。发行包由冻结二进制生成，原生清单和 macOS 二进制摘要固定在 `scripts/native-release.json`；各平台记录 binary SHA-256，lockfile 使用实际 tarball SHA-512 integrity。
+
+- 包装器完整本地测试 62 项通过，覆盖真实 HTTP socket、登录与 Codex 进程监督、隐藏输入、私有文件权限、双通道比较、取消、遥测故障隔离及 JSON stdout。全部 JS 语法检查和公开安装脚本语法检查通过；这些流程测试中的外部 CLI 和 transport 是模拟执行器。
+- 只在 Codex 子进程内合并 `NO_PROXY`/`no_proxy` 排除项并追加 loopback，保留原 proxy 变量及 native 上游环境。固定 CLI 的独立模拟验收曾证实，macOS 系统代理会截获未排除的 loopback 请求并返回 502；补排除后压缩、多轮、resume 和取消路径通过。
+- SG gateway 已升级 0.3.5，服务 active。HK 与 SG 的只读探针鉴权返回 200；无 Token 返回 401。HK 观测头使用真实 hostname，TTFB 取 `$upstream_header_time`，相邻 TCP/TLS 建连取 `$upstream_connect_time`，不把响应头阶段尚未完成的完整传输时间作为观测。
+- 新 macOS ARM64 native 0.3.5 在线探针读取到持续 WSS RTT 约 244 ms，以及 HK→SG 响应头约 114 ms、相邻 TCP/TLS 建连约 76 ms。它们来自不同测量边界，不能相加或相减推算其他 RTT。
+- 开发机的交替目录请求比较为 HK 平均约 236.7 ms、SG 直连约 91.8 ms。该样本只证明开发机当时直连更快，不能证明用户另一 HK 机房的路径最短；应从实际客户端机器运行 `mcodex ping --compare <SG WSS URL>` 并在忙时重复。
+- 经 HK 中转的固定官方 Codex 真实本机文件读取已准确返回临时文件内的随机标记，升级前后均通过（原生 client 0.3.5，升级后 server 0.3.5）。
+
+当前支持范围是固定版本 Codex 的自定义 Responses HTTP/SSE 提供商；自定义持续 WSS 隧道不等同于原生 Responses WebSocket。模拟验收覆盖大文本、SSE、本地压缩、resume、取消并丢弃上游及无请求重放；上游不提供官方远程压缩端点时，固定 CLI 使用本地压缩。原生 Linux ARM64 Docker 从冻结 0.1.5/0.1.1 tarball 完成安装、鉴权、WSS RTT/逐跳探针及真实本机文件工具验证；x64 在 QEMU 下完成同版本安装、鉴权、WSS/逐跳检测，未据此声明 x64 原生工具或性能验收。ARM64 容器仅为嵌套 Codex 沙箱增加 CAP_SYS_ADMIN、放开容器 seccomp/AppArmor，没有宿主目录挂载。公开 gateway client v0.3.5 的匿名一键安装也在 ARM64 Docker 通过，初次下载出现两次连接超时后按安装器既有重试成功。真实长时间上下文、多任务工具和原生 x64 工具仍需各自验收，不能由上述模拟或单次工具通过推断。1 MiB 单请求边界和订阅访问资格仍适用；不宣称所有未来 Codex 版本与功能完整兼容。

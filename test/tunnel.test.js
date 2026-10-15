@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, stat, rm, chmod } from 'node:fs/promises'
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { startTunnel, runCodex, nativePackage } from '../src/tunnel.js';
+import { startTunnel, runCodex, nativePackage, codexEnvironment } from '../src/tunnel.js';
 import { providerArguments, chooseModel } from '../src/provider.js';
 
 const binary = fileURLToPath(new URL('fixtures/transport.mjs', import.meta.url));
@@ -94,4 +94,25 @@ test('provider uses Responses with no automatic replay; model must exist in the 
   assert.throws(() => chooseModel([]), /no available models/);
   assert.equal(nativePackage('linux', 'arm64'), '@m9rco/mcodex-linux-arm64');
   assert.throws(() => nativePackage('win32', 'x64'), /Unsupported platform/);
+});
+
+test('Codex bypasses the loopback facade while preserving both proxy exclusion lists and native environment', () => {
+  const inherited = { NO_PROXY: 'example.com, 10.0.0.0/8,localhost', no_proxy: '.internal,example.com',
+    HTTPS_PROXY: 'http://proxy.example:8080', http_proxy: 'http://other.example:8081', ALL_PROXY: 'socks5://proxy.example:1080', CODEX_HOME: '/tmp/fixture-codex-home' };
+  const before = structuredClone(inherited);
+  const child = codexEnvironment('fixture-local-key', inherited);
+  assert.equal(child.NO_PROXY, 'example.com,10.0.0.0/8,localhost,.internal,127.0.0.1,::1');
+  assert.equal(child.no_proxy, child.NO_PROXY);
+  assert.equal(child.HTTPS_PROXY, inherited.HTTPS_PROXY);
+  assert.equal(child.http_proxy, inherited.http_proxy);
+  assert.equal(child.ALL_PROXY, inherited.ALL_PROXY);
+  assert.equal(child.CODEX_HOME, inherited.CODEX_HOME);
+  assert.equal(child.MCODEX_LOCAL_KEY, 'fixture-local-key');
+  assert.deepEqual(inherited, before, 'native upstream routing must not be mutated');
+  const wildcard = codexEnvironment('fixture-local-key', { NO_PROXY: '*' });
+  assert.equal(wildcard.NO_PROXY, '*,127.0.0.1,localhost,::1');
+  assert.equal(wildcard.no_proxy, wildcard.NO_PROXY);
+  assert.deepEqual(codexEnvironment('fixture-local-key', {}), {
+    MCODEX_LOCAL_KEY: 'fixture-local-key', NO_PROXY: '127.0.0.1,localhost,::1', no_proxy: '127.0.0.1,localhost,::1',
+  });
 });

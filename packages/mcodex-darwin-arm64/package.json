@@ -1,6 +1,6 @@
 {
   "name": "@m9rco/mcodex-darwin-arm64",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Precompiled MLab Gateway transport for mcodex (darwin-arm64)",
   "license": "MIT",
   "os": [
@@ -29,7 +29,7 @@
     "access": "public"
   },
   "mcodex": {
-    "transportVersion": "0.3.3",
-    "binarySha256": "b4c234cfaf5d9e73ac8f61a5547fb83b1b2be39715517743ddd0042daa6b1589"
+    "transportVersion": "0.3.5",
+    "binarySha256": "6cc92ee0b8ed6e1405232f8b3b572b710461b33226ae056b27a36d4645656879"
   }
 }

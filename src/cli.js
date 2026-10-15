@@ -1,4 +1,5 @@
-import { measureLatency } from './latency.js';
+import { parsePing, compareRoutes, formatComparison } from './route-comparison.js';
+import { measureLatency, collectTelemetry, formatTelemetry } from './latency.js';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,13 +8,13 @@ import { promptText } from './prompt.js';
 import { chooseModel } from './provider.js';
 import { resolveNative, resolveCodex, startTunnel, runCodex } from './tunnel.js';
 
-export const help = `mcodex 0.1.4 — official Codex with automatic gateway setup
+export const help = `mcodex 0.1.5 — official Codex with automatic gateway setup
 
 Usage:
   mcodex [Codex arguments]           Start Codex; first run asks for connection settings
   mcodex exec [Codex exec arguments] Run the official Codex non-interactively
   mcodex login [options]             Verify the connection and open Codex in a terminal
-  mcodex ping                       Measure five authenticated gateway request latencies
+  mcodex ping [--compare <WSS URL>]  Measure latency; optionally compare another gateway route
   mcodex doctor                     Check dependencies, connection and available models
   mcodex logout                     Delete mcodex connection settings
   mcodex codex [arguments]           Pass a reserved command through to official Codex
@@ -84,6 +85,17 @@ async function connectWithStatus(state, signal) {
   try {
     const tunnel = await startTunnel(state, { signal });
     console.error(`mcodex: Connection verified in ${tunnel.connectionMs.toFixed(0)} ms (includes startup and authentication).`);
+    try {
+      tunnel.telemetrySnapshot = await collectTelemetry(tunnel, state, { signal });
+      formatTelemetry(tunnel.telemetrySnapshot).forEach(line => console.error(`mcodex: ${line}`));
+    } catch (error) {
+      if (signal?.aborted) {
+        await tunnel.close();
+        throw error;
+      }
+      // Optional observations never invalidate an authenticated Codex link.
+      console.error('mcodex: Optional latency telemetry unavailable; continuing to Codex.');
+    }
     return tunnel;
   } finally {
     clearInterval(progress);
@@ -127,7 +139,7 @@ export async function main(args) {
     return 0;
   }
   if (args[0] === '--version' || args[0] === '-V') {
-    console.log('mcodex 0.1.4 (official Codex 0.162.1)');
+    console.log('mcodex 0.1.5 (official Codex 0.162.1)');
     return 0;
   }
   const directory = stateDirectory();
@@ -158,7 +170,9 @@ export async function main(args) {
       console.error('mcodex: First-time setup. Codex will start after the connection is configured.');
       return await login({}, directory, controller.signal, args[0] === 'codex' ? args.slice(1) : args);
     }
-    if (['doctor', 'ping'].includes(args[0]) && args.length !== 1) throw new Error(`mcodex ${args[0]} takes no arguments.`);
+    const ping = args[0] === 'ping' ? parsePing(args.slice(1)) : undefined;
+    if (ping?.compare === state.server) throw new Error('Choose a different WSS endpoint for comparison.');
+    if (args[0] === 'doctor' && args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
     await resolveNative();
     if (args[0] !== 'ping') resolveCodex();
     tunnel = await connectWithStatus(state, controller.signal);
@@ -169,12 +183,28 @@ export async function main(args) {
       result.samples.forEach((sample, i) => console.log(`${i + 1}: ${sample.ms === undefined ? sample.error : sample.ms.toFixed(1) + ' ms'}`));
       console.log(`Failed requests: ${result.failed}/${result.samples.length}`);
       if (result.average !== null) console.log(`min/avg/max: ${result.min.toFixed(1)}/${result.average.toFixed(1)}/${result.max.toFixed(1)} ms`);
+      const snapshot = await collectTelemetry(tunnel, state, { signal: controller.signal });
+      formatTelemetry(snapshot).forEach(line => console.log(line));
+      if (ping.compare) {
+        let candidate;
+        try {
+          console.log(`Comparing with ${new URL(ping.compare).host} using the same connection Token.`);
+          candidate = await startTunnel({ ...state, server: ping.compare }, { signal: controller.signal });
+          const comparison = await compareRoutes(tunnel, candidate, { probe: measureLatency, signal: controller.signal });
+          formatComparison(comparison).forEach(line => console.log(line));
+          if (comparison.current.failed || comparison.candidate.failed) return 1;
+        } finally {
+          await candidate?.close();
+        }
+      }
       return result.failed ? 1 : 0;
     }
     if (args[0] === 'doctor') {
       if (args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
       console.log(`mcodex: Node ${process.version}; native transport and official Codex installed.`);
       console.log(`mcodex: authenticated WSS connection OK; ${tunnel.models.length} models; connection setup ${tunnel.connectionMs.toFixed(0)} ms.`);
+      const snapshot = tunnel.telemetrySnapshot ?? await collectTelemetry(tunnel, state, { signal: controller.signal });
+      formatTelemetry(snapshot).forEach(line => console.log(line));
       console.log(tunnel.models.map(item => item.id).join('\n'));
       return 0;
     }

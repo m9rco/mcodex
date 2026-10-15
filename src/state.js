@@ -217,3 +217,8 @@ export async function deleteState(directory) {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTEMPTY' && error.code !== 'EEXIST') throw error;
   });
 }
+
+/** Revalidate private file permissions before using a Token for a TLS probe. */
+export async function readConnectionToken(state) {
+  return validateToken((await readPrivateFile(state.tokenFile, 'The mcodex connection key', MAX_TOKEN_BYTES + 1)).trim());
+}
