@@ -1,6 +1,6 @@
 {
   "name": "@m9rco/mcodex",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Run the official Codex CLI through an authenticated persistent gateway, with one-time setup.",
   "type": "module",
   "bin": {
@@ -21,7 +21,8 @@
     "NOTICE",
     "docs/PROPOSAL.md",
     "docs/VALIDATION.md",
-    "docs/TELEMETRY-AND-COMPATIBILITY.md"
+    "docs/TELEMETRY-AND-COMPATIBILITY.md",
+    "docs/ENGINE-AND-CONTEXT.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
@@ -29,12 +30,12 @@
     "pack:native": "node scripts/package-native.mjs"
   },
   "dependencies": {
-    "@openai/codex": "0.162.1"
+    "@openai/codex": "0.163.0"
   },
   "optionalDependencies": {
-    "@m9rco/mcodex-linux-x64": "0.1.1",
-    "@m9rco/mcodex-linux-arm64": "0.1.1",
-    "@m9rco/mcodex-darwin-arm64": "0.1.1"
+    "@m9rco/mcodex-linux-x64": "0.1.2",
+    "@m9rco/mcodex-linux-arm64": "0.1.2",
+    "@m9rco/mcodex-darwin-arm64": "0.1.2"
   },
   "repository": {
     "type": "git",

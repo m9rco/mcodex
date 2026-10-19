@@ -48,13 +48,13 @@ function isRunning(pid) {
   }
 }
 
-async function fixture(t, { configured = false, transport = 'normal', codexHolds = false, diagnostics = 'legacy', proxyEnv = {} } = {}) {
+async function fixture(t, { configured = false, transport = 'normal', codexHolds = false, engineHolds = false, diagnostics = 'legacy', proxyEnv = {} } = {}) {
   const directory = await mkdtemp('/tmp/mcodex-cli-flow-');
   const context = { directory, events: path.join(directory, 'events.jsonl') };
   t.after(async () => {
     // A failing assertion must not leave a fixture executable or key directory.
     for (const event of await events(context)) {
-      if (!['transport-start', 'codex-start'].includes(event.type)) continue;
+      if (!['transport-start', 'codex-start', 'codex-ready'].includes(event.type)) continue;
       if (isRunning(event.pid)) process.kill(event.pid, 'SIGKILL');
       if (event.runtimeDirectory) await rm(event.runtimeDirectory, { recursive: true, force: true });
       if (event.candidateDirectory && path.basename(event.candidateDirectory).startsWith('mcodex-login-')) await rm(event.candidateDirectory, { recursive: true, force: true });
@@ -77,6 +77,10 @@ async function fixture(t, { configured = false, transport = 'normal', codexHolds
 import { appendFileSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  console.log('mlab-gateway 0.4.0');
+  process.exit(0);
+}
 const record = value => appendFileSync(${JSON.stringify(context.events)}, JSON.stringify(value) + '\\n', { mode: 0o600 });
 const configFile = process.argv[process.argv.indexOf('--config') + 1];
 const config = Object.fromEntries(readFileSync(configFile, 'utf8').trim().split('\\n').map(line => {
@@ -119,6 +123,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   const config = path.join(directory, 'config');
   const record = path.join(directory, 'handoff.json');
   const env = { ...process.env, ...proxyEnv, MCODEX_CONFIG_DIR: config };
+  delete env.MCODEX_CODEX_BIN;
   const proxyHashes = Object.fromEntries(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']
     .map(name => [name, env[name] === undefined ? null : createHash('sha256').update(env[name]).digest('hex')]));
   const codex = path.join(application, 'node_modules', '@openai', 'codex');
@@ -127,6 +132,15 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   await writeFile(path.join(codex, 'bin', 'codex.js'), `
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  if (${JSON.stringify(engineHolds)}) {
+    appendFileSync(${JSON.stringify(context.events)}, JSON.stringify({ type: 'codex-ready', pid: process.pid }) + '\\n');
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
+  console.log('codex-cli ' + ${JSON.stringify(JSON.parse(await readFile(path.join(source, 'package.json'), 'utf8')).dependencies['@openai/codex'])});
+  process.exit(0);
+}
 const baseKeys = new Set(${JSON.stringify(Object.keys(env))});
 const token = ${JSON.stringify(token)};
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({
@@ -394,6 +408,50 @@ test('ping measures the configured tunnel without opening Codex and cleans up', 
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
   await assertClean(context, { catalogRequests: 6 });
 });
+
+for (const args of [['engine', 'status'], ['doctor', '--local'], ['--version']]) {
+  test(`${args.join(' ')} reports actual local engine versions without connection settings or a gateway`, async t => {
+    const context = await fixture(t);
+    const result = await run(t, context, args);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Codex \d+\.\d+\.\d+; source: bundled; compatibility: tested/);
+    assert.match(result.stdout, /Codex path: .*node_modules\/@openai\/codex\/bin\/codex.js/);
+    if (args[0] === 'doctor') assert.match(result.stdout, /Native transport: mlab-gateway 0.4.0/);
+    assert.equal((await events(context)).length, 0);
+    await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  });
+}
+
+test('ping does not resolve or execute an explicitly configured invalid Codex engine', async t => {
+  const context = await fixture(t, { configured: true });
+  context.env.MCODEX_CODEX_BIN = '/does-not-exist/selected-codex';
+  const result = await run(t, context, ['ping']);
+  assert.equal(result.code, 0);
+  await assertClean(context, { catalogRequests: 6 });
+});
+
+test('an invalid selected engine stops before creating a gateway process', async t => {
+  const context = await fixture(t, { configured: true });
+  context.env.MCODEX_CODEX_BIN = '/does-not-exist/selected-codex';
+  const result = await run(t, context, ['exec', '--json', 'fixture prompt']);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /selected Codex engine is missing/);
+  assert.equal((await events(context)).length, 0);
+  await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+});
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  test(`${signal} during a local engine version check terminates its process without a gateway`, async t => {
+    const context = await fixture(t, { engineHolds: true });
+    const result = await run(t, context, ['engine', 'status'], { interruptAt: 'codex', signal });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, new RegExp(`Interrupted by ${signal}`));
+    const list = await events(context);
+    const inspecting = list.find(event => event.type === 'codex-ready');
+    assert.equal(isRunning(inspecting.pid), false);
+    assert.equal(list.some(event => event.type === 'transport-start'), false);
+  });
+}
 
 test('malformed optional diagnostics do not prevent interactive Codex startup', async t => {
   const context = await fixture(t, { configured: true, diagnostics: 'malformed' });

@@ -15,8 +15,8 @@ esac
 umask 077
 MCODEX_DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mcodex-install.XXXXXX")
 trap 'node -e '\''require("node:fs").rmSync(process.argv[1], {recursive:true,force:true})'\'' "$MCODEX_DOWNLOAD_DIR"' EXIT HUP INT TERM
-MCODEX_MAIN_VERSION=0.1.6
-MCODEX_NATIVE_VERSION=0.1.1
+MCODEX_MAIN_VERSION=0.2.0
+MCODEX_NATIVE_VERSION=0.1.2
 MCODEX_RELEASE_URL=https://github.com/m9rco/mcodex/releases/download/v${MCODEX_MAIN_VERSION}
 MCODEX_MAIN_ARCHIVE=m9rco-mcodex-${MCODEX_MAIN_VERSION}.tgz
 MCODEX_NATIVE_ARCHIVE=m9rco-mcodex-${MCODEX_INSTALL_TARGET}-${MCODEX_NATIVE_VERSION}.tgz

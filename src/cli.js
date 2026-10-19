@@ -6,9 +6,10 @@ import path from 'node:path';
 import { loadState, saveState, deleteState, stateDirectory, validateServer, validateToken } from './state.js';
 import { promptText } from './prompt.js';
 import { chooseModel } from './provider.js';
-import { resolveNative, resolveCodex, startTunnel, runCodex } from './tunnel.js';
+import { resolveNative, startTunnel, runCodex } from './tunnel.js';
+import { wrapperVersion, resolveEngine, formatEngine, checkEngineUpdate, commandVersion } from './engine.js';
 
-export const help = `mcodex 0.1.6 — official Codex with automatic gateway setup
+export const help = `mcodex ${wrapperVersion} — official Codex with automatic gateway setup
 
 Usage:
   mcodex [Codex arguments]           Start Codex; first run asks for connection settings
@@ -16,6 +17,9 @@ Usage:
   mcodex login [options]             Verify the connection and open Codex in a terminal
   mcodex ping [<WSS URL>] [options] Measure a saved or specified gateway; optionally compare two connections
   mcodex doctor                     Check dependencies, connection and available models
+  mcodex doctor --local             Check local versions without connecting to a gateway
+  mcodex engine status              Show the actual Codex version and selected executable
+  mcodex engine check               Read the official npm version; does not install or switch
   mcodex logout                     Delete mcodex connection settings
   mcodex codex [arguments]           Pass a reserved command through to official Codex
 
@@ -40,6 +44,8 @@ mcodex login --no-launch --server wss://gateway.example/mlab-tunnel
 
 Connection Token is never accepted as a command-line argument.
 MCODEX_CONFIG_DIR overrides the mcodex settings directory.
+MCODEX_CODEX_BIN explicitly selects a separate Codex executable or JS launcher.
+Unset MCODEX_CODEX_BIN to return to the tested bundled engine.
 Codex arguments and its existing sandbox/approval settings remain available.
 Login opens Codex when both standard input and output are terminals.
 `;
@@ -109,10 +115,11 @@ async function connectWithStatus(state, signal, { telemetry = true } = {}) {
   }
 }
 
-async function launchCodex(tunnel, args, model, signal) {
-  resolveCodex();
+async function launchCodex(tunnel, args, model, signal, engine) {
+  engine ??= await resolveEngine({ signal });
+  if (!engine.tested) console.error(`mcodex: Warning: explicitly selected Codex ${engine.version} has not passed the compatibility suite; unset MCODEX_CODEX_BIN to use the bundled engine.`);
   if (process.stderr.isTTY) console.error('mcodex: Gateway connected. Starting Codex...');
-  return runCodex(tunnel, args, { model, signal });
+  return runCodex(tunnel, args, { model, signal, engine });
 }
 
 async function login(options, directory, signal, codexArgs) {
@@ -140,14 +147,57 @@ async function login(options, directory, signal, codexArgs) {
   }
 }
 
+function processCancellation() {
+  const controller = new AbortController();
+  const signals = ['SIGINT', 'SIGTERM'];
+  const handlers = signals.map(signal => {
+    const handler = () => controller.abort(Object.assign(new Error(`Interrupted by ${signal}.`), { signal }));
+    process.on(signal, handler);
+    return handler;
+  });
+  return { controller, cleanup: () => signals.forEach((signal, i) => process.removeListener(signal, handlers[i])) };
+}
+
+async function localCommand(action) {
+  const { controller, cleanup } = processCancellation();
+  try { return await action(controller.signal); }
+  finally { cleanup(); }
+}
+
 export async function main(args) {
   if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
     process.stdout.write(help);
     return 0;
   }
   if (args[0] === '--version' || args[0] === '-V') {
-    console.log('mcodex 0.1.6 (official Codex 0.162.1)');
-    return 0;
+    return localCommand(async signal => {
+      formatEngine(await resolveEngine({ signal })).forEach(line => console.log(line));
+      return 0;
+    });
+  }
+  if (args[0] === 'engine') {
+    if (args.length !== 2 || !['status', 'check'].includes(args[1])) throw new Error('Use mcodex engine status or mcodex engine check.');
+    return localCommand(async signal => {
+      const engine = await resolveEngine({ signal });
+      formatEngine(engine).forEach(line => console.log(line));
+      if (args[1] === 'check') {
+        const latest = await checkEngineUpdate({ signal });
+        console.log(`Official npm stable: Codex ${latest.version}; compatibility: ${latest.tested ? 'tested' : 'not yet tested'}.`);
+        console.log('Read-only check: no package or engine selection was changed.');
+      }
+      return 0;
+    });
+  }
+  if (args[0] === 'doctor' && args[1] === '--local' && args.length === 2) {
+    return localCommand(async signal => {
+      formatEngine(await resolveEngine({ signal })).forEach(line => console.log(line));
+      const binary = await resolveNative();
+      const version = await commandVersion(binary, ['--version'], { signal });
+      if (!/^mlab-gateway \d+\.\d+\.\d+\s*$/.test(version)) throw new Error('The native transport returned an invalid version.');
+      console.log(`Native transport: ${version}; path: ${binary}`);
+      console.log(`Node ${process.version}; local checks only; no gateway connection.`);
+      return 0;
+    });
   }
   const directory = stateDirectory();
   if (args[0] === 'logout') {
@@ -156,13 +206,7 @@ export async function main(args) {
     console.error('mcodex: saved connection removed.');
     return 0;
   }
-  const controller = new AbortController();
-  const signals = ['SIGINT', 'SIGTERM'];
-  const handlers = signals.map(signal => {
-    const handler = () => controller.abort(Object.assign(new Error(`Interrupted by ${signal}.`), { signal }));
-    process.on(signal, handler);
-    return handler;
-  });
+  const { controller, cleanup } = processCancellation();
   let tunnel;
   try {
     if (args[0] === 'login') {
@@ -181,7 +225,7 @@ export async function main(args) {
     if (ping?.server) state = { ...state, server: ping.server };
     if (args[0] === 'doctor' && args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
     await resolveNative();
-    if (args[0] !== 'ping') resolveCodex();
+    const engine = args[0] === 'ping' ? undefined : await resolveEngine({ signal: controller.signal });
     tunnel = await connectWithStatus(state, controller.signal, { telemetry: args[0] !== 'ping' });
     if (args[0] === 'ping') {
       if (ping.compare) {
@@ -219,6 +263,7 @@ export async function main(args) {
     if (args[0] === 'doctor') {
       if (args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
       console.log(`mcodex: Node ${process.version}; native transport and official Codex installed.`);
+      formatEngine(engine).forEach(line => console.log(line));
       console.log(`mcodex: authenticated WSS connection OK; ${tunnel.models.length} models; connection setup ${tunnel.connectionMs.toFixed(0)} ms.`);
       const snapshot = tunnel.telemetrySnapshot ?? await collectTelemetry(tunnel, state, { signal: controller.signal });
       formatTelemetry(snapshot).forEach(line => console.log(line));
@@ -227,9 +272,9 @@ export async function main(args) {
     }
     if (args[0] === 'codex') args = args.slice(1);
     const model = chooseModel(tunnel.models, state.model);
-    return await launchCodex(tunnel, args, model, controller.signal);
+    return await launchCodex(tunnel, args, model, controller.signal, engine);
   } finally {
-    await tunnel?.close();
-    signals.forEach((signal, i) => process.removeListener(signal, handlers[i]));
+    try { await tunnel?.close(); }
+    finally { cleanup(); }
   }
 }

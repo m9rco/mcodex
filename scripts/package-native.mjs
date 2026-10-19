@@ -16,12 +16,12 @@ const targets = [
 ];
 
 const args = process.argv.slice(2);
-const options = { version: '0.1.1', output: join(root, 'packages'), ...defaults };
+const options = { version: '0.1.2', output: join(root, 'packages'), ...defaults };
 for (let i = 0; i < args.length; i += 2) {
   const names = { '--version': 'version', '--out-dir': 'output', '--linux-cache': 'cache', '--darwin-binary': 'darwinBinary',
     '--release': 'release', '--repository': 'repository', '--manifest-sha256': 'manifestDigest', '--darwin-sha256': 'darwinDigest' };
   const name = names[args[i]];
-  if (!name || !args[i + 1]) throw new Error('Usage: node scripts/package-native.mjs [--version 0.1.1] [--out-dir DIR] [--linux-cache DIR] [--darwin-binary FILE] [--release v0.3.5] [--repository OWNER/REPO] [--manifest-sha256 SHA256] [--darwin-sha256 SHA256]');
+  if (!name || !args[i + 1]) throw new Error('Usage: node scripts/package-native.mjs [--version 0.1.2] [--out-dir DIR] [--linux-cache DIR] [--darwin-binary FILE] [--release v0.4.1] [--repository OWNER/REPO] [--manifest-sha256 SHA256] [--darwin-sha256 SHA256]');
   options[name] = args[i + 1];
 }
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(options.version)) throw new Error('Invalid package version');

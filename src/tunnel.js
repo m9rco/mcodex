@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { bundledCodexEntry, engineCommand, resolveEngine } from './engine.js';
 
 const require = createRequire(import.meta.url);
 
@@ -28,8 +29,7 @@ export async function resolveNative() {
 }
 
 export function resolveCodex() {
-  try { return require.resolve('@openai/codex/bin/codex.js'); }
-  catch { throw new Error('The bundled official Codex CLI is missing. Reinstall mcodex.'); }
+  return bundledCodexEntry();
 }
 
 async function stopProcess(child, exitSignal = 'SIGTERM') {
@@ -132,11 +132,13 @@ export function codexEnvironment(localKey, env = process.env) {
   return { ...env, MCODEX_LOCAL_KEY: localKey, NO_PROXY: bypass, no_proxy: bypass };
 }
 
-export async function runCodex(tunnel, args, { model, codexEntry = resolveCodex(), signal } = {}) {
+export async function runCodex(tunnel, args, { model, engine, codexEntry, signal } = {}) {
   const { providerArguments } = await import('./provider.js');
   signal?.throwIfAborted();
+  engine ??= codexEntry ? engineCommand(codexEntry) : await resolveEngine({ signal });
+  signal?.throwIfAborted();
   if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error('The native transport stopped before Codex could start.');
-  const child = spawn(process.execPath, [codexEntry, ...providerArguments({ origin: tunnel.origin, model }), ...args], {
+  const child = spawn(engine.command, [...engine.prefix, ...providerArguments({ origin: tunnel.origin, model }), ...args], {
     stdio: 'inherit',
     env: codexEnvironment(tunnel.key),
   });

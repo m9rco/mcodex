@@ -79,3 +79,21 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 - 回归覆盖地址覆盖和原配置/Token 文件逐字节保留、同地址成功、配对顺序、鉴权、取消清理、格式校验和私密数据不回显。CLI 流程模拟探针使用 loopback，避免外部 DNS 影响。
 - 完整测试 74 项通过，JS 语法、安装脚本语法与差异检查通过。
 - macOS ARM64 使用实际原生转发程序连接 SG/HK，通过指定 HK 单独探测、HK 与 HK 同地址比较、显式 SG 与 HK 比较。每次操作后保存的配置与 Token 文件保持一致，临时私有状态最终删除；模型生成次数为 0。这些结果证明命令和鉴权链路可用，不能替代用户机房的延迟测量。
+
+
+## 0.2.0 引擎隔离与长请求验收（2026-10-20）
+
+主包0.2.0默认Codex0.163.0，平台包0.1.2使用gateway0.4.1。`MCODEX_CODEX_BIN`可显式选择官方native或JS launcher，默认不查PATH；显示实际版本、来源、路径和已验收状态。`engine check`只读官方npm元数据。版本检查超时/取消会停止进程树；native符号链接保留调用名称，兼容Volta等shim。
+
+本机Node完整套件94/94通过，语法与diff检查通过。覆盖两种外部引擎的参数/退出码、HOME/CODEX_HOME/cwd保留、无Token进入Codex、无网关的本地检查、只读版本查询、信号清理和协议/上限诊断白名单。官方0.163.0的JS与native版本检查通过。
+
+Rust默认78项通过、2项按设计忽略；实际隔离安装的官方0.162.1与0.163.0各自通过超1MiB、真实本地工具、手动压缩、进程重启resume及取消验收，每次5个合成请求且无重放。默认16MiB边界、超限413、预算429、未知长度、IO错误400、旧新协议互通、错误协商、取消释放和上游context_length_exceeded保真均通过。生产模型额度与任意长会话行为不由mock测试证明。
+
+Linux CI初次真实工具测试暴露宿主限制：`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`。隔离fixture改为显式测试沙箱策略，只执行固定printf且使用合成上游/临时CODEX_HOME；不代表Linux系统沙箱已验收，正式mcodex不改用户沙箱或审批设置。失败tag v0.4.0没有发行资产，后续候选使用v0.4.1。
+
+本机OpenSpec从Volta管理的1.2.0升级到1.14.3。mcodex仓库初始化后，`openspec list --json`能解析当前根；真实production runCodex→Codex0.163.0 app-server的skills/list发现5个项目OpenSpec技能，errors=0，cwd正确。该检查独立HOME/CODEX_HOME并禁用网络，未调用推理。初始化按官方迁移移除了旧4个全局opsx-*入口，替代入口为项目技能；旧openspec-*提示文件没有改写。其他机器或目录需要各自初始化/更新，不能把本机结果当作所有项目结果。
+
+
+发行验收补充：私有gateway v0.4.1的[Release CI 39292350492](https://github.com/m9rco/mlab-subscription-gateway/actions/runs/39292350492)通过两版官方CLI、Linux x64/ARM64、默认78项测试与安装脚本检查。公开原生客户端Release v0.4.1已校验归档及SHA-256。
+
+SG已部署0.4.1，配置16MiB/128MiB预算，并成对保留旧二进制和旧配置回滚副本。通过SG直连与HK入口的实际v2验收均通过：3MiB JSON在模型调用前返回400 unsupported_request(param=model)，16MiB+1的声明长度在读入前返回413，随后health200且WSS保持连接。旧0.3.5客户端对两入口健康请求均200。测试不调用模型、不消耗生成额度；连接Key摘要及OAuth文件mtime保持原值，临时本地Key与进程已清理。

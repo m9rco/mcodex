@@ -95,3 +95,38 @@ test('synchronous optional collectors are isolated and failure is not mislabeled
   assert.match(formatTelemetry(snapshot)[0], /probe failed/);
   assert.match(formatTelemetry(snapshot)[1], /probe failed/);
 });
+
+test('negotiated transport limits expose only whitelisted numeric observations and distinguish legacy fallback', async () => {
+  const { readDiagnostics, formatDiagnostics } = await import('../src/latency.js');
+  const transport = { protocol: 'mlab-tunnel-v2', effective_max_body_bytes: 16 * 1024 * 1024, configured_max_body_bytes: 16 * 1024 * 1024,
+    request_body_budget_bytes: 128 * 1024 * 1024, private_metadata: 'fixture-transport-secret' };
+  const body = { schema_version: 1, connected: true, transport, tunnel: { rtt: null }, hops: [] };
+  const read = data => readDiagnostics(tunnel, { request: async () => Response.json(data) });
+  const result = await read(body);
+  assert.deepEqual(Object.keys(result.transport), ['protocol', 'effective_max_body_bytes', 'configured_max_body_bytes', 'request_body_budget_bytes']);
+  assert.equal(JSON.stringify(result).includes('fixture-transport-secret'), false);
+  assert.match(formatDiagnostics(result).join('\n'), /protocol v2; request-body cap 16.0 MiB \(16777216 bytes\)/);
+  assert.doesNotMatch(formatDiagnostics(result).join('\n'), /Legacy v1 fallback/);
+  const legacy = await read({ ...body, transport: { ...transport, protocol: 'mlab-tunnel-v1', effective_max_body_bytes: 1024 * 1024 } });
+  assert.match(formatDiagnostics(legacy).join('\n'), /protocol v1; request-body cap 1.0 MiB/);
+  assert.match(formatDiagnostics(legacy).join('\n'), /Legacy v1 fallback/);
+  const disconnected = await read({ ...body, connected: false });
+  assert.equal(disconnected.transport, null);
+  assert.doesNotMatch(formatDiagnostics(disconnected).join('\n'), /protocol v2|16777216/);
+});
+
+test('old, malformed or inconsistent transport limits stay unavailable without invalidating RTT diagnostics', async () => {
+  const { readDiagnostics, formatDiagnostics } = await import('../src/latency.js');
+  const valid = { protocol: 'mlab-tunnel-v2', effective_max_body_bytes: 16 * 1024 * 1024, configured_max_body_bytes: 16 * 1024 * 1024, request_body_budget_bytes: 128 * 1024 * 1024 };
+  for (const transport of [undefined, null, {}, { ...valid, protocol: '2' }, { ...valid, protocol: 2 }, { ...valid, protocol: 'mlab-tunnel-v3' },
+    { ...valid, effective_max_body_bytes: -1 }, { ...valid, effective_max_body_bytes: '16777216' },
+    { ...valid, effective_max_body_bytes: 17 * 1024 * 1024 }, { ...valid, configured_max_body_bytes: 33 * 1024 * 1024 },
+    { ...valid, protocol: 'mlab-tunnel-v1' }, { ...valid, request_body_budget_bytes: 1024 * 1024 * 1024 + 1 },
+    { ...valid, request_body_budget_bytes: Number.MAX_SAFE_INTEGER + 1 }]) {
+    const result = await readDiagnostics(tunnel, { request: async () => Response.json({ schema_version: 1, connected: true, transport,
+      tunnel: { rtt: { latest_ms: 12, age_ms: 0 } }, hops: [] }) });
+    assert.equal(result.transport, null);
+    assert.match(formatDiagnostics(result)[0], /12.0 ms/);
+    assert.match(formatDiagnostics(result).join('\n'), /Transport protocol\/body limits: unavailable/);
+  }
+});

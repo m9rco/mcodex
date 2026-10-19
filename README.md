@@ -27,7 +27,7 @@ mcodex
 也可直接从公开 GitHub Release 安装，适用于固定版本和校验安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.1.6/install.sh | sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.0/install.sh | sh
 ```
 
 一键脚本会确认旧版全局包和命令属于本项目，再自动替换旧安装；不会使用 `--force` 覆盖其他程序的同名命令。
@@ -48,6 +48,9 @@ mcodex exec "解释这个仓库的入口"
 | --- | --- |
 | `mcodex login` | 在终端验证并保存连接，成功后直接进入 Codex |
 | `mcodex login --no-launch` | 只验证并保存连接 |
+| `mcodex engine status` | 显示实际 Codex 版本、来源、路径和兼容验证状态 |
+| `mcodex engine check` | 只读检查官方 Codex 最新版，不安装或切换 |
+| `mcodex doctor --local` | 离线检查本机引擎和转发程序，无需连接 Token |
 | `mcodex doctor` | 检查安装和连接，不发起模型生成 |
 | `mcodex ping` | 检测请求耗时、WSS 心跳 RTT 和逐跳观测 |
 | `mcodex ping <WSS URL>` | 直接检测指定节点，保留已保存的连接设置 |
@@ -58,7 +61,7 @@ mcodex exec "解释这个仓库的入口"
 | `mcodex exec "..."` | 执行官方 Codex 非交互任务 |
 | `mcodex resume` | 恢复官方 Codex 会话 |
 
-`login`、`logout`、`doctor` 和包装器帮助命令由 mcodex 处理；其他命令和参数转交官方 Codex。模型、工作目录、沙箱和审批选项仍通过 Codex 参数控制，例如 `mcodex --model <模型名>`。
+`login`、`logout`、`doctor`、`engine` 和包装器帮助命令由 mcodex 处理；其他命令和参数转交官方 Codex。模型、工作目录、沙箱和审批选项仍通过 Codex 参数控制，例如 `mcodex --model <模型名>`。
 
 ## 工作方式
 
@@ -79,13 +82,30 @@ mcodex 使用本机随机端口和临时 API Key，通过官方 Codex 的自定�
 
 主要收益是安装和使用更简单。请求的数据通路仍是原来的 Rust WSS 长连接，Node.js 不参与逐块转发。首次连接和启动进程仍有开销；模型生成速度取决于网络、网关和上游模型，套壳本身不会让模型生成更快。
 
-此版本固定依赖 `@openai/codex@0.162.1`，并捆绑各平台的 Rust 转发程序。安装过程中无需编译 Rust，也没有下载二进制的 `postinstall` 脚本。Windows 暂未支持。
+此版本默认捆绑已验证的 `@openai/codex@0.163.0` 和各平台 Rust 转发程序。可通过 `MCODEX_CODEX_BIN` 显式使用独立安装的官方 Codex，让引擎与包装器分别升级；默认不会自动跟随系统 PATH 或最新版。见下方说明。安装过程中无需编译 Rust，也没有下载二进制的 `postinstall` 脚本。Windows 暂未支持。
 
 Linux 本机工具需要系统允许官方 Codex 创建沙箱。Docker 默认限制可能阻止嵌套沙箱；具体测试条件与平台覆盖见 [验收记录](docs/VALIDATION.md)。
 
 远端网关必须实现 MLab Gateway 的 WSS 协议，并已完成合法的订阅授权。使用仍需满足 OpenAI 账户、套餐和地区适用规则，mcodex 不改变这些资格。
 
 Codex 的自定义提供商能力见 [官方配置文档](https://developers.openai.com/codex/config-advanced)，订阅访问接口见 [官方 Sign in with ChatGPT 文档](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)。
+
+## Codex 独立升级与长会话
+
+```sh
+mcodex engine status
+mcodex engine check
+# 显式选择已独立安装的官方 Codex，可使用绝对路径：
+MCODEX_CODEX_BIN="$(command -v codex)" mcodex
+# 使用捆绑版本：
+unset MCODEX_CODEX_BIN
+```
+
+外部引擎必须是官方 Codex 可执行文件或其 JS launcher；不要指向 mcodex。指定尚未验证的版本时会提示兼容状态，用户选择仍被保留。`engine check` 只读取官方 npm 元数据，既不安装也不修改默认版本。维护者在更新默认版本前运行真实 CLI 的协议兼容测试；仅修改版本号不构成兼容验证。
+
+原生客户端与服务端 0.4.1 使用协商后的 v2 隧道，默认接受最大 16 MiB 请求体，硬上限 32 MiB，并在读取请求前限制同时占用的内存。旧端仍通过 v1 连接，保留 1 MiB 上限并明确返回 413。请求体字节上限与模型 token 上下文窗口不同；模型窗口仍由 Codex 元数据和上游决定，不会通过虚报窗口或截断会话绕过限制。
+
+OpenSpec 必须在实际项目中初始化；新版 Codex 集成为 `.agents/skills/`，在项目根运行 `openspec init --tools codex` 后使用 `$openspec-propose "需求"`。已有集成升级用 `openspec update`。mcodex 保留原有工作目录、`HOME` 与 `CODEX_HOME`。版本隔离、错误分类和项目排查见 [引擎与上下文说明](docs/ENGINE-AND-CONTEXT.md)。
 
 ## 开发与分发
 
@@ -94,9 +114,9 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.1.6`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.1`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.2.0`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.2`，npm 根据系统和 CPU 安装对应包。
 
-维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.3.5`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
+维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.4.1`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
 
 ```sh
 node scripts/package-native.mjs --darwin-binary /path/to/mlab-gateway
@@ -106,7 +126,7 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-主包和原生包分别维护版本。`v0.1.6` Release 使用 `m9rco-mcodex-0.1.6.tgz` 与三个已发行的 `0.1.1` 原生 tarball，原生转发程序为 0.3.5。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+主包和原生包分别维护版本。`v0.2.0` Release 使用 `m9rco-mcodex-0.2.0.tgz` 与三个 `0.1.2` 原生 tarball，原生转发程序为 0.4.1。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
 
 npm 发布后需等待公开下载并校验冻结 tarball，不能以提交回执或两步验证完成作为发行成功。运行 `node scripts/verify-published.mjs --directory <冻结目录>`；有限等待和状态排查方法见 [发布后验证](docs/RELEASE-VERIFICATION.md)。
 

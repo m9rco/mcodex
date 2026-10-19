@@ -1,6 +1,16 @@
 import { probeRelay, formatRelayPath } from './relay-path.js';
 import { performance } from 'node:perf_hooks';
 
+function transportLimits(value, connected) {
+  if (!connected || !value || !['mlab-tunnel-v1', 'mlab-tunnel-v2'].includes(value.protocol)) return null;
+  const names = ['effective_max_body_bytes', 'configured_max_body_bytes', 'request_body_budget_bytes'];
+  if (!names.every(name => Number.isSafeInteger(value[name]) && value[name] > 0)) return null;
+  if (value.effective_max_body_bytes > value.configured_max_body_bytes || value.configured_max_body_bytes > 32 * 1024 * 1024
+      || value.request_body_budget_bytes > 1024 * 1024 * 1024
+      || (value.protocol === 'mlab-tunnel-v1' && value.effective_max_body_bytes > 1024 * 1024)) return null;
+  return { protocol: value.protocol, ...Object.fromEntries(names.map(name => [name, value[name]])) };
+}
+
 // Measure an authenticated, read-only request over the established WSS tunnel.
 // This includes gateway processing, not just the client-to-relay network RTT.
 export async function measureLatency(tunnel, { count = 5, timeoutMs = 3000, signal, request = fetch } = {}) {
@@ -60,6 +70,7 @@ export async function readDiagnostics(tunnel, { signal, request = fetch } = {}) 
   ) : null;
   return { available: true, schema_version: 1, connected: value.connected,
     tunnel: { metric: 'websocket_ping_round_trip', rtt: measured }, hops: [],
+    transport: transportLimits(value.transport, value.connected),
     hop_status: 'relay_observations_unavailable' };
 }
 
@@ -75,6 +86,12 @@ export function formatDiagnostics(value) {
     lines.push(`WSS heartbeat RTT: ${rtt.latest_ms.toFixed(1)} ms; age ${(rtt.age_ms / 1000).toFixed(1)} s${stats} (includes all relays and control queue).`);
   } else lines.push('WSS heartbeat RTT: no current observation.');
   if (!value.hops?.length) lines.push('Per-hop latency: unavailable; relay-side observations required.');
+  const transport = transportLimits(value.transport, value.connected);
+  if (transport) {
+    const mib = bytes => (bytes / (1024 * 1024)).toFixed(1);
+    lines.push(`Transport: protocol ${transport.protocol === 'mlab-tunnel-v2' ? 'v2' : 'v1'}; request-body cap ${mib(transport.effective_max_body_bytes)} MiB (${transport.effective_max_body_bytes} bytes); configured ${mib(transport.configured_max_body_bytes)} MiB; buffer budget ${mib(transport.request_body_budget_bytes)} MiB.`);
+    if (transport.protocol === 'mlab-tunnel-v1') lines.push('Legacy v1 fallback: request bodies remain capped at 1 MiB; update the gateway for larger contexts.');
+  } else lines.push('Transport protocol/body limits: unavailable (older native transport, disconnected or invalid observation).');
   return lines;
 }
 

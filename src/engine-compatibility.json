@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "tested_versions": ["0.162.1", "0.163.0"],
+  "scope": "Official CLI launch, HTTP Responses/SSE, local tools, local compaction, resume and cancellation through the MLab gateway. External versions are explicitly selected and are never activated automatically."
+}

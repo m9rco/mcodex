@@ -1,6 +1,6 @@
 {
-  "release": "v0.3.5",
+  "release": "v0.4.1",
   "repository": "m9rco/mlab-gateway-client",
-  "manifestDigest": "e5098b3163dc21ed4786681eb39b681747150dd2f71f4e616fa1e929d4f868d4",
-  "darwinDigest": "6cc92ee0b8ed6e1405232f8b3b572b710461b33226ae056b27a36d4645656879"
+  "manifestDigest": "f4367c5301f947e104ee7769b1b2a75e345ddab52de257c7171d6b9a277b2fad",
+  "darwinDigest": "f4efabc97cb3cc9c4de8de22c290d6a58dda99192f156459f1693ca27d7e3d67"
 }

@@ -1,6 +1,6 @@
 {
   "name": "@m9rco/mcodex-linux-x64",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Precompiled MLab Gateway transport for mcodex (linux-x64)",
   "license": "MIT",
   "os": [
@@ -29,7 +29,7 @@
     "access": "public"
   },
   "mcodex": {
-    "transportVersion": "0.3.5",
-    "binarySha256": "e627ca4c86f8d1e3c0be13d7a8b2d36e31de74b6497f3f432f3fed29acbc6261"
+    "transportVersion": "0.4.1",
+    "binarySha256": "85c6a84aafd8bf4343da2c87920950ab1a1fb113e89075d6537992abf69985aa"
   }
 }
