@@ -115,3 +115,11 @@ SG已部署0.4.1，配置16MiB/128MiB预算，并成对保留旧二进制和旧�
 SG 已部署 0.4.2、服务 active，保留二进制与配置的成对回滚副本。16 MiB/128 MiB 配置与连接 Key 保留，升级健康检查期间 OAuth 文件 mtime 未变。SG 直连和 HK 中继均通过新原生客户端实物验证：受鉴权握手版本 0.4.2、协议 v2、16 MiB 有效上限；3 MiB 请求在模型调用前返回 400 unsupported_request(param=model)，16 MiB+1 声明长度返回 413，之后 health 200 且连接保持。原生 0.3.5 对两入口的健康请求也均为 200。临时本地 Key、子进程和工作目录已清理，无模型生成。
 
 新 lockfile 的三平台 SHA-512 integrity 来自本次实际 tarball；隔离目录中离线执行 `npm ci --omit=optional --ignore-scripts` 成功。已有 npm Token 在发布预检返回 E401，GitHub 版本可用并不表示 npm latest 已更新。
+
+## 发行后补记（2026-10-21）
+
+冻结 tag v0.2.1 为 a72e656，已公开的 6 个 GitHub 附件 API SHA-256 全部匹配本地冻结文件，未重新打包或移动标签。最终 main [CI 39453600413](https://github.com/m9rco/mcodex/actions/runs/39453600413) 110/110 通过；[引擎启动检查 39453600023](https://github.com/m9rco/mcodex/actions/runs/39453600023) 的实际官方 0.162.1 与 0.163.0 各 60/60 通过。
+
+干净 ARM64 与 x64 QEMU Docker 的禁网 tarball 安装均通过：main 0.2.1、平台包 0.1.3、实际 native 0.4.2、实际官方 Codex 0.163.0，doctor 本地匹配验证成功；真实 Codex app-server 发现各自 fixture 的 6 个 OpenSpec 技能并保留 cwd。x64 QEMU 不代表原生 x64 性能或 OS 沙箱验收。另一次 ARM64 使用空 npm 缓存，从公开 GitHub 下载未修改的一键脚本，核验脚本及清单摘要后完成同版本安装和 doctor 检查，退出 0；该公开安装测试没有自行安装 OpenSpec。所有容器都已清理，没有生产凭据、网关连接或模型调用。
+
+前述 npm 凭据预检的 E401 原因已纠正：直接 Bearer 请求有效并返回 m9rco。准确工作目录下，npm 把 /Users/marcopu 识别为项目根，项目层凭据覆盖了 SDK 注入的用户层 Token。改用 CLI 层内存配置并核对有效凭据后，SDK whoami 正确返回 m9rco；没有改写用户 npmrc，也没有把 Token 保存进文件或仓库。服务端随后要求各包发布两步验证；这与账号网页登录及公开下载验证分别核对。冻结发行包中的先前 E401 记录属于当时预检结果，不能解读为 Token 已失效或 npm 已发行成功。
