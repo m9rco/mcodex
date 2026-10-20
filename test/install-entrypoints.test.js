@@ -26,3 +26,20 @@ test('installer pins the same wrapper and native versions as package.json', asyn
   assert.equal(versions.length, 3);
   assert.deepEqual([...new Set(versions)], [literal('MCODEX_NATIVE_VERSION')]);
 });
+
+test('tracked native package metadata matches wrapper pins and frozen release digests', async () => {
+  const manifest = JSON.parse(await read('package.json'));
+  const native = JSON.parse(await read('scripts/native-release.json'));
+  const notice = await read('NOTICE');
+  for (const suffix of ['linux-x64', 'linux-arm64', 'darwin-arm64']) {
+    const directory = `packages/mcodex-${suffix}`;
+    const metadata = JSON.parse(await read(`${directory}/package.json`));
+    assert.equal(metadata.name, `@m9rco/mcodex-${suffix}`);
+    assert.equal(metadata.version, manifest.optionalDependencies[metadata.name]);
+    assert.equal(metadata.mcodex.transportVersion, native.release.slice(1));
+    assert.match(metadata.mcodex.binarySha256, /^[a-f0-9]{64}$/);
+    assert.equal(await read(`${directory}/SHA256SUMS`), `${metadata.mcodex.binarySha256}  bin/mlab-gateway\n`);
+    assert.equal(await read(`${directory}/NOTICE`), notice);
+    if (suffix === 'darwin-arm64') assert.equal(metadata.mcodex.binarySha256, native.darwinDigest);
+  }
+});
