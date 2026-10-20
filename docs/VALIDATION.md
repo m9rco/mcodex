@@ -55,7 +55,7 @@ Linux x64 在 ARM64 主机上的 QEMU 测试完成了安装、连接和模型回
 - 开发机的交替目录请求比较为 HK 平均约 236.7 ms、SG 直连约 91.8 ms。该样本只证明开发机当时直连更快，不能证明用户另一 HK 机房的路径最短；应从实际客户端机器运行 `mcodex ping --compare <SG WSS URL>` 并在忙时重复。
 - 经 HK 中转的固定官方 Codex 真实本机文件读取已准确返回临时文件内的随机标记，升级前后均通过（原生 client 0.3.5，升级后 server 0.3.5）。
 
-当前支持范围是固定版本 Codex 的自定义 Responses HTTP/SSE 提供商；自定义持续 WSS 隧道不等同于原生 Responses WebSocket。模拟验收覆盖大文本、SSE、本地压缩、resume、取消并丢弃上游及无请求重放；上游不提供官方远程压缩端点时，固定 CLI 使用本地压缩。原生 Linux ARM64 Docker 从冻结 0.1.5/0.1.1 tarball 完成安装、鉴权、WSS RTT/逐跳探针及真实本机文件工具验证；x64 在 QEMU 下完成同版本安装、鉴权、WSS/逐跳检测，未据此声明 x64 原生工具或性能验收。ARM64 容器仅为嵌套 Codex 沙箱增加 CAP_SYS_ADMIN、放开容器 seccomp/AppArmor，没有宿主目录挂载。公开 gateway client v0.3.5 的匿名一键安装也在 ARM64 Docker 通过，初次下载出现两次连接超时后按安装器既有重试成功。真实长时间上下文、多任务工具和原生 x64 工具仍需各自验收，不能由上述模拟或单次工具通过推断。1 MiB 单请求边界和订阅访问资格仍适用；不宣称所有未来 Codex 版本与功能完整兼容。
+0.1.5 的验收范围为固定版本 Codex 的自定义 Responses HTTP/SSE 提供商；自定义持续 WSS 隧道不等同于原生 Responses WebSocket。模拟验收覆盖大文本、SSE、本地压缩、resume、取消并丢弃上游及无请求重放；上游不提供官方远程压缩端点时，固定 CLI 使用本地压缩。原生 Linux ARM64 Docker 从冻结 0.1.5/0.1.1 tarball 完成安装、鉴权、WSS RTT/逐跳探针及真实本机文件工具验证；x64 在 QEMU 下完成同版本安装、鉴权、WSS/逐跳检测，未据此声明 x64 原生工具或性能验收。ARM64 容器仅为嵌套 Codex 沙箱增加 CAP_SYS_ADMIN、放开容器 seccomp/AppArmor，没有宿主目录挂载。公开 gateway client v0.3.5 的匿名一键安装也在 ARM64 Docker 通过，初次下载出现两次连接超时后按安装器既有重试成功。真实长时间上下文、多任务工具和原生 x64 工具仍需各自验收，不能由上述模拟或单次工具通过推断。该旧版验收采用 1 MiB 单请求边界；订阅访问资格仍适用；不宣称所有未来 Codex 版本与功能完整兼容。
 
 ## 0.1.5 公开安装与发布校验补记
 
@@ -114,7 +114,7 @@ SG已部署0.4.1，配置16MiB/128MiB预算，并成对保留旧二进制和旧�
 
 SG 已部署 0.4.2、服务 active，保留二进制与配置的成对回滚副本。16 MiB/128 MiB 配置与连接 Key 保留，升级健康检查期间 OAuth 文件 mtime 未变。SG 直连和 HK 中继均通过新原生客户端实物验证：受鉴权握手版本 0.4.2、协议 v2、16 MiB 有效上限；3 MiB 请求在模型调用前返回 400 unsupported_request(param=model)，16 MiB+1 声明长度返回 413，之后 health 200 且连接保持。原生 0.3.5 对两入口的健康请求也均为 200。临时本地 Key、子进程和工作目录已清理，无模型生成。
 
-新 lockfile 的三平台 SHA-512 integrity 来自本次实际 tarball；隔离目录中离线执行 `npm ci --omit=optional --ignore-scripts` 成功。已有 npm Token 在发布预检返回 E401，GitHub 版本可用并不表示 npm latest 已更新。
+新 lockfile 的三平台 SHA-512 integrity 来自本次实际 tarball；隔离目录中离线执行 `npm ci --omit=optional --ignore-scripts` 成功。发行前 SDK 预检曾返回 E401，后续确认是配置优先级导致，并已纠正，见下方发行后补记。GitHub 版本可用并不表示 npm latest 已更新。
 
 ## 发行后补记（2026-10-21）
 
@@ -122,4 +122,8 @@ SG 已部署 0.4.2、服务 active，保留二进制与配置的成对回滚副�
 
 干净 ARM64 与 x64 QEMU Docker 的禁网 tarball 安装均通过：main 0.2.1、平台包 0.1.3、实际 native 0.4.2、实际官方 Codex 0.163.0，doctor 本地匹配验证成功；真实 Codex app-server 发现各自 fixture 的 6 个 OpenSpec 技能并保留 cwd。x64 QEMU 不代表原生 x64 性能或 OS 沙箱验收。另一次 ARM64 使用空 npm 缓存，从公开 GitHub 下载未修改的一键脚本，核验脚本及清单摘要后完成同版本安装和 doctor 检查，退出 0；该公开安装测试没有自行安装 OpenSpec。所有容器都已清理，没有生产凭据、网关连接或模型调用。
 
-前述 npm 凭据预检的 E401 原因已纠正：直接 Bearer 请求有效并返回 m9rco。准确工作目录下，npm 把 /Users/marcopu 识别为项目根，项目层凭据覆盖了 SDK 注入的用户层 Token。改用 CLI 层内存配置并核对有效凭据后，SDK whoami 正确返回 m9rco；没有改写用户 npmrc，也没有把 Token 保存进文件或仓库。服务端随后要求各包发布两步验证；这与账号网页登录及公开下载验证分别核对。冻结发行包中的先前 E401 记录属于当时预检结果，不能解读为 Token 已失效或 npm 已发行成功。
+前述 npm 凭据预检的 E401 原因已纠正：直接 Bearer 请求有效并返回 m9rco。在维护脚本的工作目录下，npm 把用户主目录识别为项目根，项目层凭据覆盖了 SDK 注入的用户层 Token。改用 CLI 层内存配置并核对有效凭据后，SDK whoami 正确返回 m9rco；没有改写用户 npmrc，也没有把 Token 保存进文件或仓库。服务端随后要求各包发布两步验证；这与账号网页登录及公开下载验证分别核对。冻结发行包中的先前 E401 记录属于当时预检结果，不能解读为 Token 已失效或 npm 已发行成功。
+
+2026-10-21，三个平台包 0.1.3 先完成公开下载与摘要校验，再提交主包 0.2.1。npm 生命周期从 validating 转为 published 后，完整匿名发行检查退出 0：四个包的公开 metadata、latest 标签、SHA-512 integrity 与实际 tarball 下载全部匹配冻结文件。发布使用隔离的官方 npm 12.2.0 和进程内 CLI 层凭据，每次请求有明确超时；没有更改全局 npm 或保存发布 Token。GitHub v0.2.1 的标签、归档及 SHA256SUMS 保持冻结，发行后文档单独更新。
+
+最终 npm 安装验收：干净 Linux ARM64 和 Linux x64 QEMU Docker 均使用空缓存、全新 prefix，匿名从 registry.npmjs.org 执行精确版本 `npm install -g @m9rco/mcodex@0.2.1`，分别约 24 秒和 54 秒完成，退出 0。两者实际主包 0.2.1、对应原生包 0.1.3、原生二进制 0.4.2、官方 Codex 0.163.0，`doctor --local` 显示 bundled match verified。二进制 SHA-256 同时匹配 npm 包 metadata 和冻结资产；没有本地 tarball/GitHub 回退、生产凭据、网关连接或模型调用，容器已清理。x64 QEMU 的结果限定为安装、版本和本地诊断，不扩展到原生性能或 OS 沙箱验收。

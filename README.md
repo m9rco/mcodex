@@ -6,10 +6,11 @@
 
 需要 Node.js 22 或更新版本。支持 Linux x64、Linux ARM64 和 macOS ARM64。npm 包名为 `@m9rco/mcodex`，安装后的命令为 `mcodex`。
 
-当前修复版为 **0.2.1**，请先使用 GitHub 一键安装入口；npm 的 `latest` 仍可能是旧版 0.1.5，单纯 `npm update` 不能保证获得修复。安装后运行 `mcodex doctor --local` 核对实际版本。
+当前修复版 **0.2.1** 已在 npm 和 GitHub 公开发布，三个平台包均已核对实际下载摘要。安装或升级后运行 `mcodex doctor --local` 核对实际版本。
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.1/install.sh | sh
+npm install -g @m9rco/mcodex@0.2.1
+mcodex doctor --local
 mcodex
 ```
 
