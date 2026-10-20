@@ -1,15 +1,18 @@
 import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, chmod, writeFile, rm, access } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { mkdtemp, chmod, writeFile, rm, access, realpath, stat, readFile } from 'node:fs/promises';
+import { constants, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { bundledCodexEntry, engineCommand, resolveEngine } from './engine.js';
+import { bundledCodexEntry, commandVersion, engineCommand, resolveEngine } from './engine.js';
+import { formatConnectionFailure, readConnectionFailure } from './latency.js';
 
 const require = createRequire(import.meta.url);
+const wrapperManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const nativeVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export function nativePackage(platform = process.platform, arch = process.arch) {
   const supported = new Set(['linux-x64', 'linux-arm64', 'darwin-arm64']);
@@ -18,7 +21,18 @@ export function nativePackage(platform = process.platform, arch = process.arch) 
   return `@m9rco/mcodex-${target}`;
 }
 
-export async function resolveNative() {
+export async function resolveNative({ env = process.env } = {}) {
+  if (env.MCODEX_NATIVE_BIN !== undefined) {
+    if (typeof env.MCODEX_NATIVE_BIN !== 'string' || !env.MCODEX_NATIVE_BIN.trim()) {
+      throw new Error('MCODEX_NATIVE_BIN must name an executable native transport. Unset it to use the bundled transport.');
+    }
+    const binary = path.resolve(env.MCODEX_NATIVE_BIN);
+    try {
+      if (!(await stat(binary)).isFile()) throw new Error('not a file');
+      await access(binary, constants.X_OK);
+    } catch { throw new Error('The selected native transport is missing or cannot be executed. Unset MCODEX_NATIVE_BIN to use the bundled transport.'); }
+    return binary;
+  }
   const name = nativePackage();
   let manifest;
   try { manifest = require.resolve(`${name}/package.json`); }
@@ -26,6 +40,30 @@ export async function resolveNative() {
   const binary = path.join(path.dirname(manifest), 'bin', 'mlab-gateway');
   await access(binary, constants.X_OK);
   return binary;
+}
+
+export async function inspectNative({ binary, env = process.env, signal, timeoutMs, resolveManifest = name => require.resolve(`${name}/package.json`) } = {}) {
+  const external = binary !== undefined || env.MCODEX_NATIVE_BIN !== undefined;
+  binary ??= await resolveNative({ env });
+  let packageVersion = null;
+  let expectedVersion = null;
+  if (!external) {
+    const name = nativePackage();
+    let metadata;
+    try { metadata = JSON.parse(await readFile(resolveManifest(name), 'utf8')); }
+    catch { throw new Error('The bundled native transport metadata is invalid. Reinstall mcodex with optional dependencies enabled.'); }
+    packageVersion = metadata.version;
+    expectedVersion = metadata.mcodex?.transportVersion;
+    if (metadata.name !== name || packageVersion !== wrapperManifest.optionalDependencies[name] || !nativeVersionPattern.test(expectedVersion ?? '')) {
+      throw new Error('The bundled native transport package does not match mcodex. Reinstall mcodex with optional dependencies enabled.');
+    }
+  }
+  const output = await commandVersion(binary, ['--version'], { env, signal, timeoutMs, subject: 'native transport' });
+  const match = output.match(/^mlab-gateway (\S+)\s*$/);
+  if (!match || !nativeVersionPattern.test(match[1])) throw new Error('The native transport returned an invalid version.');
+  if (expectedVersion !== null && match[1] !== expectedVersion) throw new Error('The bundled native transport binary does not match its package metadata. Reinstall mcodex.');
+  return { version: match[1], source: external ? 'external' : 'bundled', path: await realpath(binary), packageVersion, expectedVersion,
+    matchesExpected: expectedVersion === null ? null : match[1] === expectedVersion };
 }
 
 export function resolveCodex() {
@@ -43,7 +81,8 @@ async function stopProcess(child, exitSignal = 'SIGTERM') {
 
 export async function startTunnel(state, { binary, timeoutMs = 30000, signal } = {}) {
   const startedAt = performance.now();
-  binary ??= await resolveNative();
+  const native = await inspectNative({ binary, signal });
+  binary = native.path;
   const directory = await mkdtemp(path.join(tmpdir(), 'mcodex-'));
   await chmod(directory, 0o700);
   const key = randomBytes(32).toString('base64url');
@@ -90,6 +129,7 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
     child.stderr.on('data', inspect);
     const deadline = Date.now() + timeoutMs;
     let lastStatus;
+    let lastConnectionFailure;
     while (Date.now() < deadline) {
       signal?.throwIfAborted();
       if (failure) throw failure;
@@ -103,18 +143,28 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
           if (response.ok) {
             const data = await response.json();
             if (!Array.isArray(data.data)) throw new Error('The gateway returned an invalid model catalog.');
-            return { origin, key, models: data.data, connectionMs: performance.now() - startedAt, child, close, directory };
+            return { origin, key, models: data.data, connectionMs: performance.now() - startedAt, child, close, directory, native };
           }
           await response.body?.cancel();
           if ([401, 403].includes(lastStatus)) throw new Error('Gateway authentication failed. Run mcodex login with a valid connection Token.');
+          // A successful reconnect clears the native observation. Do not keep a
+          // stale handshake failure when the remaining fault is upstream HTTP.
+          lastConnectionFailure = await readConnectionFailure(origin, key, { signal, timeoutMs: Math.min(500, Math.max(1, deadline - Date.now())) });
+          if (lastConnectionFailure?.stage === 'handshake'
+            && (lastConnectionFailure.code === 'handshake_invalid'
+              || (lastConnectionFailure.code === 'handshake_rejected' && [400, 401, 403, 404, 405, 426].includes(lastConnectionFailure.status)))) {
+            throw Object.assign(new Error(`Gateway connection rejected: ${formatConnectionFailure(lastConnectionFailure)}. Check the gateway endpoint, connection Token and supported tunnel protocol.`), { code: 'MCODEX_CONNECTION_REJECTED' });
+          }
         } catch (error) {
           if (signal?.aborted) throw error;
-          if (lastStatus === 401 || lastStatus === 403 || error.message === 'The gateway returned an invalid model catalog.') throw error;
+          if (lastStatus === 401 || lastStatus === 403 || error.code === 'MCODEX_CONNECTION_REJECTED' || error.message === 'The gateway returned an invalid model catalog.') throw error;
         }
       }
       await delay(100, undefined, { signal });
     }
-    throw new Error(`Gateway connection timed out${lastStatus ? ` (HTTP ${lastStatus})` : ''}. Check the server address, connection Token, TLS and network.`);
+    throw new Error(lastConnectionFailure
+      ? `Gateway connection failed: ${formatConnectionFailure(lastConnectionFailure)}. Check the gateway route or retry after its admission limit clears.`
+      : `Gateway connection timed out${lastStatus ? ` (HTTP ${lastStatus})` : ''}. Check the server address, connection Token, TLS and network.`);
   } catch (error) {
     await close();
     throw error;
@@ -138,7 +188,7 @@ export async function runCodex(tunnel, args, { model, engine, codexEntry, signal
   engine ??= codexEntry ? engineCommand(codexEntry) : await resolveEngine({ signal });
   signal?.throwIfAborted();
   if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error('The native transport stopped before Codex could start.');
-  const child = spawn(engine.command, [...engine.prefix, ...providerArguments({ origin: tunnel.origin, model }), ...args], {
+  const child = spawn(engine.command, [...engine.prefix, ...providerArguments({ origin: tunnel.origin, model, engine }), ...args], {
     stdio: 'inherit',
     env: codexEnvironment(tunnel.key),
   });

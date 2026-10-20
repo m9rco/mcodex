@@ -6,8 +6,8 @@ import path from 'node:path';
 import { loadState, saveState, deleteState, stateDirectory, validateServer, validateToken } from './state.js';
 import { promptText } from './prompt.js';
 import { chooseModel } from './provider.js';
-import { resolveNative, startTunnel, runCodex } from './tunnel.js';
-import { wrapperVersion, resolveEngine, formatEngine, checkEngineUpdate, commandVersion } from './engine.js';
+import { resolveNative, inspectNative, startTunnel, runCodex } from './tunnel.js';
+import { wrapperVersion, resolveEngine, formatEngine, checkEngineUpdate } from './engine.js';
 
 export const help = `mcodex ${wrapperVersion} — official Codex with automatic gateway setup
 
@@ -46,9 +46,20 @@ Connection Token is never accepted as a command-line argument.
 MCODEX_CONFIG_DIR overrides the mcodex settings directory.
 MCODEX_CODEX_BIN explicitly selects a separate Codex executable or JS launcher.
 Unset MCODEX_CODEX_BIN to return to the tested bundled engine.
+MCODEX_NATIVE_BIN explicitly selects a native transport; unset it to use the matched bundled package.
 Codex arguments and its existing sandbox/approval settings remain available.
 Login opens Codex when both standard input and output are terminals.
 `;
+
+function formatNative(native, { path: showPath = false } = {}) {
+  if (!native) return ['Native transport version: unavailable.'];
+  const lines = [`Native transport: mlab-gateway ${native.version}; source: ${native.source}; package: ${native.packageVersion ?? 'external'}; bundled match: ${native.matchesExpected === true ? 'verified' : 'not verified'}.`];
+  if (showPath) lines.push(`Native path: ${native.path}`);
+  const [major, minor] = native.version.split('.').map(Number);
+  if (major === 0 && minor < 4) lines.push('Legacy native transport: request bodies remain capped at 1 MiB even with a newer gateway. Install the current mcodex release on this client.');
+  else if (native.source === 'external') lines.push('Explicit external native transport selected; compatibility is not guaranteed by the bundled release. Unset MCODEX_NATIVE_BIN to return to the matched transport.');
+  return lines;
+}
 
 export function parseLogin(args) {
   const options = {};
@@ -97,6 +108,7 @@ async function connectWithStatus(state, signal, { telemetry = true } = {}) {
   try {
     const tunnel = await startTunnel(state, { signal });
     console.error(`mcodex: Connection verified in ${tunnel.connectionMs.toFixed(0)} ms (includes startup and authentication).`);
+    formatNative(tunnel.native).forEach(line => console.error(`mcodex: ${line}`));
     try {
       if (!telemetry) return tunnel;
       tunnel.telemetrySnapshot = await collectTelemetry(tunnel, state, { signal });
@@ -118,7 +130,10 @@ async function connectWithStatus(state, signal, { telemetry = true } = {}) {
 async function launchCodex(tunnel, args, model, signal, engine) {
   engine ??= await resolveEngine({ signal });
   if (!engine.tested) console.error(`mcodex: Warning: explicitly selected Codex ${engine.version} has not passed the compatibility suite; unset MCODEX_CODEX_BIN to use the bundled engine.`);
-  if (process.stderr.isTTY) console.error('mcodex: Gateway connected. Starting Codex...');
+  if (process.stderr.isTTY) {
+    formatEngine(engine).forEach(line => console.error(`mcodex: ${line}`));
+    console.error('mcodex: Gateway connected. Starting Codex...');
+  }
   return runCodex(tunnel, args, { model, signal, engine });
 }
 
@@ -191,10 +206,7 @@ export async function main(args) {
   if (args[0] === 'doctor' && args[1] === '--local' && args.length === 2) {
     return localCommand(async signal => {
       formatEngine(await resolveEngine({ signal })).forEach(line => console.log(line));
-      const binary = await resolveNative();
-      const version = await commandVersion(binary, ['--version'], { signal });
-      if (!/^mlab-gateway \d+\.\d+\.\d+\s*$/.test(version)) throw new Error('The native transport returned an invalid version.');
-      console.log(`Native transport: ${version}; path: ${binary}`);
+      formatNative(await inspectNative({ signal }), { path: true }).forEach(line => console.log(line));
       console.log(`Node ${process.version}; local checks only; no gateway connection.`);
       return 0;
     });
@@ -264,9 +276,11 @@ export async function main(args) {
       if (args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
       console.log(`mcodex: Node ${process.version}; native transport and official Codex installed.`);
       formatEngine(engine).forEach(line => console.log(line));
+      formatNative(tunnel.native, { path: true }).forEach(line => console.log(line));
       console.log(`mcodex: authenticated WSS connection OK; ${tunnel.models.length} models; connection setup ${tunnel.connectionMs.toFixed(0)} ms.`);
       const snapshot = tunnel.telemetrySnapshot ?? await collectTelemetry(tunnel, state, { signal: controller.signal });
       formatTelemetry(snapshot).forEach(line => console.log(line));
+      console.log('Limit diagnosis: 413 is a transport request-body limit; 400 context_length_exceeded is the model token window; 429 may be a local memory/concurrency limit or upstream quota (check its code); 503 indicates connection/availability failure. These limits are independent.');
       console.log(tunnel.models.map(item => item.id).join('\n'));
       return 0;
     }

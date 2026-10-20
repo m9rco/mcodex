@@ -35,7 +35,7 @@ function inspectionEnvironment(env) {
   return result;
 }
 
-export async function commandVersion(command, args, { env = process.env, signal, timeoutMs = 5000 } = {}) {
+export async function commandVersion(command, args, { env = process.env, signal, timeoutMs = 5000, subject = 'Codex engine' } = {}) {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { env: inspectionEnvironment(env), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
@@ -51,23 +51,23 @@ export async function commandVersion(command, args, { env = process.env, signal,
         catch { child.kill('SIGKILL'); }
       }
     };
-    const timer = setTimeout(() => stop('Codex version inspection timed out.'), timeoutMs);
-    const abort = () => stop('Codex version inspection was cancelled.');
+    const timer = setTimeout(() => stop(`${subject} version inspection timed out.`), timeoutMs);
+    const abort = () => stop(`${subject} version inspection was cancelled.`);
     signal?.addEventListener('abort', abort, { once: true });
     const collect = (chunk, stdout) => {
       bytes += chunk.length;
-      if (bytes > 65536) return stop('Codex version output exceeded its limit.');
+      if (bytes > 65536) return stop(`${subject} version output exceeded its limit.`);
       if (stdout) output += chunk.toString();
     };
     child.stdout.on('data', chunk => collect(chunk, true));
     child.stderr.on('data', chunk => collect(chunk, false));
-    child.once('error', () => { failure ??= new Error('Unable to execute the selected Codex engine.'); });
+    child.once('error', () => { failure ??= new Error(`Unable to execute the selected ${subject}.`); });
     child.once('close', code => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
-      if (signal?.aborted) return reject(signal.reason ?? new Error('Codex version inspection was cancelled.'));
+      if (signal?.aborted) return reject(signal.reason ?? new Error(`${subject} version inspection was cancelled.`));
       if (failure) return reject(failure);
-      if (code !== 0) return reject(new Error('The selected Codex engine failed its version check.'));
+      if (code !== 0) return reject(new Error(`The selected ${subject} failed its version check.`));
       resolve(output.trim());
     });
     if (signal?.aborted) abort();

@@ -130,3 +130,55 @@ test('old, malformed or inconsistent transport limits stay unavailable without i
     assert.match(formatDiagnostics(result).join('\n'), /Transport protocol\/body limits: unavailable/);
   }
 });
+
+test('connection diagnostics distinguish capacity and network failures without echoing arbitrary metadata', async () => {
+  const { readConnectionFailure, formatConnectionFailure } = await import('../src/latency.js');
+  const failure = { stage: 'handshake', code: 'tunnel_connection_limit', status: 429, retry_after_seconds: 1,
+    message: 'Bearer fixture-private-token', headers: { Authorization: 'fixture-private-token' }, body: 'fixture-private-token' };
+  const result = await readConnectionFailure(tunnel.origin, tunnel.key, { request: async () => Response.json({
+    schema_version: 1, connected: false, hops: [], last_connection_error: failure,
+  }) });
+  assert.deepEqual(result, { stage: 'handshake', code: 'tunnel_connection_limit', status: 429, retry_after_seconds: 1 });
+  assert.match(formatConnectionFailure(result), /connection limit reached.*HTTP 429; retry after 1 s/);
+  assert.doesNotMatch(formatConnectionFailure(result), /fixture-private-token/);
+  assert.match(formatConnectionFailure({ stage: 'write', code: 'write_timeout' }), /write deadline expired.*not replayed/);
+  assert.match(formatConnectionFailure({ stage: 'handshake', code: 'tunnel_frame_budget_exhausted' }), /buffer budget is busy/);
+  assert.equal(formatConnectionFailure({ stage: 'secret', code: 'fixture-private-token' }), null);
+});
+
+test('diagnostic failure observations clear on reconnect and reject unknown or malformed fields', async () => {
+  const { readConnectionFailure, readDiagnostics, formatDiagnostics, parseConnectionFailure } = await import('../src/latency.js');
+  const failure = { stage: 'write', code: 'write_io_error', status: 2000, retry_after_seconds: 'fixture-private-token' };
+  assert.deepEqual(parseConnectionFailure(failure), { stage: 'write', code: 'write_io_error' });
+  const body = { schema_version: 1, connected: true, tunnel: { rtt: null }, hops: [], last_connection_error: failure };
+  assert.equal(await readConnectionFailure(tunnel.origin, tunnel.key, { request: async () => Response.json(body) }), null);
+  const observed = await readDiagnostics(tunnel, { request: async () => Response.json({ ...body, connected: false }) });
+  assert.match(formatDiagnostics(observed).join('\n'), /WSS connection failed while writing/);
+  for (const last_connection_error of [null, {}, { ...failure, code: 'fixture-private-token' }, { ...failure, stage: 'fixture-private-token' }]) {
+    assert.equal(await readConnectionFailure(tunnel.origin, tunnel.key, { request: async () => Response.json({ ...body, connected: false, last_connection_error }) }), null);
+  }
+  assert.equal(await readConnectionFailure(tunnel.origin, tunnel.key, { request: async () => new Response('private error', { status: 404 }) }), null);
+  assert.equal(await readConnectionFailure(tunnel.origin, tunnel.key, { request: async () => { throw new Error('fixture-private-token'); } }), null);
+});
+
+test('diagnostics bound response bodies and preserve cancellation for connection failure probes', async () => {
+  const { readConnectionFailure, readDiagnostics } = await import('../src/latency.js');
+  await assert.rejects(readDiagnostics(tunnel, { request: async () => new Response('x'.repeat(32769)) }), /exceeded its limit/);
+  assert.equal(await readConnectionFailure(tunnel.origin, tunnel.key, { request: async () => new Response('x'.repeat(32769)) }), null);
+  const controller = new AbortController();
+  controller.abort(new Error('cancelled'));
+  await assert.rejects(readConnectionFailure(tunnel.origin, tunnel.key, { signal: controller.signal, request: async () => { throw new Error('private transport error'); } }), /cancelled/);
+});
+
+test('gateway versions are optional authenticated observations and never arbitrary printable strings', async () => {
+  const { readDiagnostics, formatDiagnostics } = await import('../src/latency.js');
+  const body = { schema_version: 1, connected: true, hops: [], transport: { protocol: 'mlab-tunnel-v2',
+    effective_max_body_bytes: 16 * 1024 * 1024, configured_max_body_bytes: 16 * 1024 * 1024, request_body_budget_bytes: 128 * 1024 * 1024 } };
+  const result = await readDiagnostics(tunnel, { request: async () => Response.json({ ...body, transport: { ...body.transport, server_version: '0.4.2' } }) });
+  assert.match(formatDiagnostics(result).join('\n'), /Gateway version: 0.4.2/);
+  for (const server_version of [null, 'fixture-private-token', '\u001b[31m0.4.2', '0.4.2\nAuthorization: secret']) {
+    const safe = await readDiagnostics(tunnel, { request: async () => Response.json({ ...body, transport: { ...body.transport, server_version } }) });
+    assert.match(formatDiagnostics(safe).join('\n'), /Gateway version: unavailable/);
+    assert.doesNotMatch(JSON.stringify(safe), /fixture-private-token|Authorization|001b/);
+  }
+});

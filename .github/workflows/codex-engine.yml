@@ -1,4 +1,4 @@
-name: Official Codex engine launch compatibility
+name: Official Codex engine launch checks (protocol acceptance is separate)
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       codex_version:
-        description: Explicit official Codex version to inspect without changing the bundled default
+        description: Exact official version for launch-only inspection; full protocol acceptance runs in the gateway repository
         required: false
         default: '0.163.0'
 
@@ -52,9 +52,17 @@ jobs:
         env:
           CODEX_VERSION: ${{ inputs.codex_version }}
         run: |
-          node -e 'if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(process.env.CODEX_VERSION)) process.exit(1)'
+          node <<'JS'
+          const version = process.env.CODEX_VERSION;
+          const numeric = '(?:0|[1-9][0-9]*)';
+          const identifier = '(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)';
+          const exact = new RegExp(`^${numeric}\\.${numeric}\\.${numeric}(?:-${identifier}(?:\\.${identifier})*)?$`);
+          if (!exact.test(version) || version.trim() !== version) throw new Error('Select an exact Codex version, not a tag or version range');
+          JS
           npm install --prefix "$RUNNER_TEMP/codex-engine" --registry https://registry.npmjs.org --ignore-scripts --no-audit --no-fund "@openai/codex@$CODEX_VERSION"
       - name: Report candidate status without activating it
         env:
           MCODEX_CODEX_BIN: ${{ runner.temp }}/codex-engine/node_modules/@openai/codex/bin/codex.js
-        run: node bin/mcodex.js engine status
+        run: |
+          node bin/mcodex.js engine status
+          echo 'Scope: executable identity and launch only. Full Responses, tools, compaction, resume and cancellation acceptance must pass the gateway compatibility workflow before this version is added to the tested manifest or bundled.'

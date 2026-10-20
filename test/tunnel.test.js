@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, stat, rm, chmod } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, realpath, stat, rm, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { startTunnel, runCodex, nativePackage, codexEnvironment } from '../src/tunnel.js';
+import { startTunnel, runCodex, nativePackage, resolveNative, inspectNative, codexEnvironment } from '../src/tunnel.js';
 import { providerArguments, chooseModel } from '../src/provider.js';
 
 const binary = fileURLToPath(new URL('fixtures/transport.mjs', import.meta.url));
@@ -27,6 +27,9 @@ test('dynamic loopback transport authenticates and cleans up its private local k
   assert.equal((await stat(tunnel.directory)).mode & 0o777, 0o700);
   assert.equal((await stat(path.join(tunnel.directory, 'local.key'))).mode & 0o777, 0o600);
   assert.deepEqual(tunnel.models, [{ id: 'test-model' }]);
+  assert.equal(tunnel.native.version, '0.4.2');
+  assert.equal(tunnel.native.source, 'external');
+  assert.equal(tunnel.native.expectedVersion, null);
   const response = await fetch(`${tunnel.origin}/v1/models`);
   assert.equal(response.status, 401);
   await tunnel.close();
@@ -55,7 +58,26 @@ test('invalid server credentials and early native failure are surfaced without l
   await assert.rejects(startTunnel(denied.state, { binary, timeoutMs: 3000 }), /authentication failed/);
   const exited = await fixture(t, 'wss://exit.invalid/tunnel');
   await assert.rejects(startTunnel(exited.state, { binary, timeoutMs: 3000 }), /Native transport exited \(17\)/);
-  await assert.rejects(startTunnel(exited.state, { binary: '/nonexistent/mcodex-native', timeoutMs: 1000 }), /Unable to start/);
+  await assert.rejects(startTunnel(exited.state, { binary: '/nonexistent/mcodex-native', timeoutMs: 1000 }), /Unable to execute.*native transport/);
+});
+
+test('connection setup reports only whitelisted native admission and endpoint failures', async t => {
+  const limited = await fixture(t, 'wss://overloaded.invalid/tunnel');
+  await assert.rejects(startTunnel(limited.state, { binary, timeoutMs: 350 }), error => {
+    assert.match(error.message, /tunnel_connection_limit/);
+    assert.match(error.message, /429/);
+    assert.equal(error.message.includes('fixture-sensitive'), false);
+    return true;
+  });
+  const denied = await fixture(t, 'wss://rejected.invalid/tunnel');
+  const started = Date.now();
+  await assert.rejects(startTunnel(denied.state, { binary, timeoutMs: 3000 }), error => {
+    assert.equal(error.code, 'MCODEX_CONNECTION_REJECTED');
+    assert.match(error.message, /handshake_rejected/);
+    assert.equal(error.message.includes('fixture-sensitive'), false);
+    return true;
+  });
+  assert.ok(Date.now() - started < 2500, 'a terminal endpoint rejection should not spend the full setup retry budget');
 });
 
 test('aborted setup terminates native transport', async t => {
@@ -94,6 +116,30 @@ test('provider uses Responses with no automatic replay; model must exist in the 
   assert.throws(() => chooseModel([]), /no available models/);
   assert.equal(nativePackage('linux', 'arm64'), '@m9rco/mcodex-linux-arm64');
   assert.throws(() => nativePackage('win32', 'x64'), /Unsupported platform/);
+});
+
+test('only the exact bundled engine suppresses the separate official updater', () => {
+  const options = { origin: 'http://127.0.0.1:4321', model: 'test-model' };
+  assert.ok(providerArguments({ ...options, engine: { source: 'bundled' } }).includes('check_for_update_on_startup=false'));
+  for (const engine of [undefined, { source: 'external' }]) {
+    assert.equal(providerArguments({ ...options, engine }).some(argument => argument.includes('check_for_update_on_startup')), false);
+  }
+});
+
+test('explicit native transport selection reports its actual version without claiming bundled compatibility', async t => {
+  const { directory } = await fixture(t);
+  const target = path.join(directory, 'native-legacy');
+  await writeFile(target, '#!/bin/sh\necho "mlab-gateway 0.3.5"\n', { mode: 0o700 });
+  const env = { ...process.env, MCODEX_NATIVE_BIN: target, MCODEX_LOCAL_KEY: 'must-not-reach-inspection' };
+  assert.equal(await resolveNative({ env }), target);
+  assert.deepEqual(await inspectNative({ env }), {
+    version: '0.3.5', source: 'external', path: await realpath(target), packageVersion: null, expectedVersion: null, matchesExpected: null,
+  });
+  for (const selector of ['', directory, path.join(directory, 'missing')]) {
+    await assert.rejects(resolveNative({ env: { ...env, MCODEX_NATIVE_BIN: selector } }), /must name|missing|cannot be executed/);
+  }
+  await writeFile(target, '#!/bin/sh\necho "fixture-sensitive-invalid-output"\n', { mode: 0o700 });
+  await assert.rejects(inspectNative({ env }), error => /invalid version/.test(error.message) && !error.message.includes('fixture-sensitive'));
 });
 
 test('Codex bypasses the loopback facade while preserving both proxy exclusion lists and native environment', () => {

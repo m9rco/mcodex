@@ -97,3 +97,21 @@ Linux CI初次真实工具测试暴露宿主限制：`bwrap: loopback: Failed RT
 发行验收补充：私有gateway v0.4.1的[Release CI 39292350492](https://github.com/m9rco/mlab-subscription-gateway/actions/runs/39292350492)通过两版官方CLI、Linux x64/ARM64、默认78项测试与安装脚本检查。公开原生客户端Release v0.4.1已校验归档及SHA-256。
 
 SG已部署0.4.1，配置16MiB/128MiB预算，并成对保留旧二进制和旧配置回滚副本。通过SG直连与HK入口的实际v2验收均通过：3MiB JSON在模型调用前返回400 unsupported_request(param=model)，16MiB+1的声明长度在读入前返回413，随后health200且WSS保持连接。旧0.3.5客户端对两入口健康请求均200。测试不调用模型、不消耗生成额度；连接Key摘要及OAuth文件mtime保持原值，临时本地Key与进程已清理。
+
+## 0.2.1 上传稳定性、安装来源与更新隔离（2026-10-20）
+
+修复版主包 0.2.1、原生包 0.1.3、Rust client/server 0.4.2，默认官方 Codex 维持稳定版 0.163.0。发行前公开 registry 核对显示 npm latest 仍为主包 0.1.5、原生包 0.1.1（binary 0.3.5），0.2.0/0.1.2 未公开；这解释了仅 npm 更新后仍有 1 MiB 限制的安装路径。GitHub 旧 root install.sh 另有 0.1.4/0.1.0 版本漂移，已统一为 scripts/install.sh 的兼容副本，并用 CI 检查两入口内容、包版本和语法。已发布旧资产保持冻结。
+
+慢上传缺陷用 loopback WebSocket 和合成请求复现：16 MiB 请求在约 4.5 秒背压下，1 秒心跳的旧客户端约 2 秒误断线返回 503；相同 fixture 修复后约 4.55 秒返回 200。额外覆盖 Ping/Pong 与 flush 的竞态、真实 Pong 丢失、独立写入超时及无重放。取消 HTTP 后，排队及正在写出的原始数据仍占用共享内存许可，flush 或 drop 后才释放。测试无生产凭据或模型流量。
+
+官方 0.162.1 和 0.163.0 的实际 CLI 均通过完整模拟协议验收：超 1 MiB 输入、SSE、本机固定工具、本地压缩、重启 resume、取消上游和无请求重放。候选版本工作流接受明确版本且核对实际执行文件版本；负例声明 0.164.0 而执行 0.163.0 在请求前失败。捆绑引擎仅在进程参数中关闭全局升级提示，外部引擎保留其自己的升级策略；不改 HOME/CODEX_HOME、项目 cwd、用户沙箱或配置文件。候选通过不自动更改默认版本或兼容白名单。
+
+新增诊断显示实际包装器、Codex、原生包与二进制版本，和受鉴权握手观察到的服务端版本、协议、有效字节上限。最近建连错误只允许固定阶段/错误码和有限数字，远端原始消息不进入输出；区分握手连接/帧预算 429、请求体 413、模型上下文 400、写入 504 和连接 503。诊断 JSON 设 32 KiB 上限；旧版本缺诊断时保留兼容性。
+
+本机增补验证：最终 CLI 流程 38/38、安装入口及安全诊断 17/17；此前完整 Node 套件 107/107 后新增两项混版安装拒绝用例均通过。原生默认套件 86/86、2 项按设计忽略，fmt/clippy/diff 检查通过。新 Mac ARM64 0.4.2 实物二进制已通过本地合成服务端验收：3 MiB 请求进入模型调用前的校验返回 400，声明 16 MiB+1 返回 413，随后连接健康 200；受鉴权握手版本正确为 0.4.2。
+
+私有 [v0.4.2 Release CI](https://github.com/m9rco/mlab-subscription-gateway/actions/runs/39450837339) 全部成功，包含两版官方 CLI、Linux x64/ARM64 静态构建、86 项测试和安装器检查。公开 client v0.4.2 的 7 项资产 API SHA-256 与本地冻结文件一致。
+
+SG 已部署 0.4.2、服务 active，保留二进制与配置的成对回滚副本。16 MiB/128 MiB 配置与连接 Key 保留，升级健康检查期间 OAuth 文件 mtime 未变。SG 直连和 HK 中继均通过新原生客户端实物验证：受鉴权握手版本 0.4.2、协议 v2、16 MiB 有效上限；3 MiB 请求在模型调用前返回 400 unsupported_request(param=model)，16 MiB+1 声明长度返回 413，之后 health 200 且连接保持。原生 0.3.5 对两入口的健康请求也均为 200。临时本地 Key、子进程和工作目录已清理，无模型生成。
+
+新 lockfile 的三平台 SHA-512 integrity 来自本次实际 tarball；隔离目录中离线执行 `npm ci --omit=optional --ignore-scripts` 成功。已有 npm Token 在发布预检返回 E401，GitHub 版本可用并不表示 npm latest 已更新。

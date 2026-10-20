@@ -6,8 +6,10 @@
 
 需要 Node.js 22 或更新版本。支持 Linux x64、Linux ARM64 和 macOS ARM64。npm 包名为 `@m9rco/mcodex`，安装后的命令为 `mcodex`。
 
+当前修复版为 **0.2.1**，请先使用 GitHub 一键安装入口；npm 的 `latest` 仍可能是旧版 0.1.5，单纯 `npm update` 不能保证获得修复。安装后运行 `mcodex doctor --local` 核对实际版本。
+
 ```sh
-npm install -g @m9rco/mcodex
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.1/install.sh | sh
 mcodex
 ```
 
@@ -24,10 +26,10 @@ mcodex
 
 如果安装过旧的未加 scope 包，先运行 `npm uninstall -g mcodex`，再安装 `@m9rco/mcodex`，避免同名命令冲突。卸载旧安装包会保留 mcodex 的连接配置。
 
-也可直接从公开 GitHub Release 安装，适用于固定版本和校验安装资产的情况。脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22：
+GitHub Release 脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22。可重复运行升级，连接设置保留：
 
 ```sh
-curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.0/install.sh | sh
+curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.1/install.sh | sh
 ```
 
 一键脚本会确认旧版全局包和命令属于本项目，再自动替换旧安装；不会使用 `--force` 覆盖其他程序的同名命令。
@@ -101,9 +103,9 @@ MCODEX_CODEX_BIN="$(command -v codex)" mcodex
 unset MCODEX_CODEX_BIN
 ```
 
-外部引擎必须是官方 Codex 可执行文件或其 JS launcher；不要指向 mcodex。指定尚未验证的版本时会提示兼容状态，用户选择仍被保留。`engine check` 只读取官方 npm 元数据，既不安装也不修改默认版本。维护者在更新默认版本前运行真实 CLI 的协议兼容测试；仅修改版本号不构成兼容验证。
+外部引擎必须是官方 Codex 可执行文件或其 JS launcher；不要指向 mcodex。指定尚未验证的版本时会提示兼容状态，用户选择仍被保留。`engine check` 只读取官方 npm 元数据，既不安装也不修改默认版本。维护者在更新默认版本前运行真实 CLI 的协议兼容测试；仅修改版本号不构成兼容验证。捆绑引擎关闭官方的启动升级提示，避免提示命令升级到另一个全局 Codex；显式外部引擎保留其自己的升级设置。
 
-原生客户端与服务端 0.4.1 使用协商后的 v2 隧道，默认接受最大 16 MiB 请求体，硬上限 32 MiB，并在读取请求前限制同时占用的内存。旧端仍通过 v1 连接，保留 1 MiB 上限并明确返回 413。请求体字节上限与模型 token 上下文窗口不同；模型窗口仍由 Codex 元数据和上游决定，不会通过虚报窗口或截断会话绕过限制。
+原生客户端与服务端 0.4.2 保留协商后的 v2 隧道，默认接受最大 16 MiB 请求体，硬上限 32 MiB，并在读取请求前限制同时占用的内存。旧端仍通过 v1 连接，保留 1 MiB 上限并明确返回 413。请求体字节上限与模型 token 上下文窗口不同；模型窗口仍由 Codex 元数据和上游决定，不会通过虚报窗口或截断会话绕过限制。
 
 OpenSpec 必须在实际项目中初始化；新版 Codex 集成为 `.agents/skills/`，在项目根运行 `openspec init --tools codex` 后使用 `$openspec-propose "需求"`。已有集成升级用 `openspec update`。mcodex 保留原有工作目录、`HOME` 与 `CODEX_HOME`。版本隔离、错误分类和项目排查见 [引擎与上下文说明](docs/ENGINE-AND-CONTEXT.md)。
 
@@ -114,9 +116,9 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.2.0`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.2`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.2.1`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.3`，npm 根据系统和 CPU 安装对应包。
 
-维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.4.1`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
+维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.4.2`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
 
 ```sh
 node scripts/package-native.mjs --darwin-binary /path/to/mlab-gateway
@@ -126,11 +128,19 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-主包和原生包分别维护版本。`v0.2.0` Release 使用 `m9rco-mcodex-0.2.0.tgz` 与三个 `0.1.2` 原生 tarball，原生转发程序为 0.4.1。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+主包和原生包分别维护版本。`v0.2.1` Release 使用 `m9rco-mcodex-0.2.1.tgz` 与三个 `0.1.3` 原生 tarball，原生转发程序为 0.4.2。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
 
 npm 发布后需等待公开下载并校验冻结 tarball，不能以提交回执或两步验证完成作为发行成功。运行 `node scripts/verify-published.mjs --directory <冻结目录>`；有限等待和状态排查方法见 [发布后验证](docs/RELEASE-VERIFICATION.md)。
 
 连接等待分层：默认 SG 上游响应头预算 30 秒，隧道总预算 90 秒（包含授权刷新），mcodex 客户端预算 120 秒。SG 的超时会返回具体 504 错误；真正断线仍中断当前任务并为后续任务自动重连，不自动重放已提交任务。SG 自定义超时更长时，客户端预算也必须相应增加。
+
+### 大请求、断线与诊断
+
+0.4.2 修复大请求写入期间的假心跳超时：Ping 实际写出后才开始等待 Pong。独立的写入预算限制卡住的上传；取消 HTTP 请求后，排队或写入中的数据仍计入内存预算。失联后为后续请求重连，已提交生成不重放。
+
+`mcodex doctor --local` 显示包装器、实际 Codex、原生包及二进制版本；`mcodex doctor` 再显示服务端版本、协商协议、有效请求体上限和安全的最近建连错误。默认 128 MiB 服务端原始请求预算中，64 MiB 用于连接帧预留，按每条 v2 隧道 16 MiB 计算可同时预留 4 条；`ping --compare` 会使用两条连接。达到预算返回 429；这与模型上下文、账户额度和单个请求体上限不同。
+
+原生客户端 `write_timeout_seconds` 默认 30 秒，SG 默认心跳失联预算为 45 秒。单独扩大客户端写入预算不能突破服务端心跳限制；持续慢上传仍会有界失败。具体错误分类与排查见 [引擎与上下文说明](docs/ENGINE-AND-CONTEXT.md)。
 
 ### 延迟检测
 
@@ -143,7 +153,7 @@ mcodex ping wss://hk.0x06.cn/mlab-tunnel
 mcodex ping --server wss://sg.0x06.cn/mlab-tunnel
 ```
 
-原生客户端的心跳 RTT 来源于同一条持续 WSS 连接的匹配 Ping/Pong，保留最近 32 个样本及其年龄，重连后清空。它包含所有中继和控制消息排队。`ping`、`doctor` 和交互启动使用同一遥测快照；未知、旧版原生包或暂时检测失败都显示为不可用，不把它们当成 0，也不阻断已验证的 Codex 连接。诊断只读取目录/健康状态，不能代替真实生成或工具验收。
+原生客户端的心跳 RTT 来源于同一条持续 WSS 连接的匹配 Ping/Pong，保留最近 32 个样本及其年龄，重连后清空。从本机 Ping 写出到匹配 Pong 计算，包含所有中继及远端处理，排除本机 Ping 等待大请求写出的排队时间。`ping`、`doctor` 和交互启动使用同一遥测快照；未知、旧版原生包或暂时检测失败都显示为不可用，不把它们当成 0，也不阻断已验证的 Codex 连接。诊断只读取目录/健康状态，不能代替真实生成或工具验收。
 
 如果入口配置了受鉴权的 `/mlab-probe`，还会显示 client→入口的 TCP 和 TLS 建连耗时，以及每个中继独立提供的下游响应头时间（TTFB）、可选的相邻 TCP/TLS 建连时间。最多 8 个连续跳段；样本数量与年龄单独显示。`downstream_header_ms` 来自 nginx 的 `$upstream_header_time`，包含到达下游健康响应头前的 TCP/TLS、其后中继和处理时间，属于累计量，不能把多跳时间相加，也不能与 WSS RTT 相减推算单跳网络 RTT。它不等同于完整响应传输耗时。nginx 的计时分辨率为 1 ms，测得 0 表示低于分辨率。探针禁止重定向，连接 Token 只发送到配置的、证书验证通过的入口。
 

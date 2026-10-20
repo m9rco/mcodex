@@ -146,8 +146,27 @@ for (const kind of ['js', 'native']) {
     assert.equal(handoff.cwd, process.cwd());
     assert.equal(handoff.localKey, tunnel.key);
     assert.equal(JSON.stringify(handoff).includes(connectionToken), false);
+    assert.equal(handoff.args.some(value => value.includes('check_for_update_on_startup')), false, 'an explicit external engine retains its own update policy');
   });
 }
+
+test('the bundled engine receives the centrally managed updater policy without changing its user config', async t => {
+  const { directory, filename } = await fixture(t);
+  const engine = await resolveEngine({ env: {}, bundledEntry: () => filename });
+  const tokenFile = path.join(directory, 'connection.key');
+  await writeFile(tokenFile, 'engine-fixture-server-token-1234567890\n', { mode: 0o600 });
+  const binary = fileURLToPath(new URL('./fixtures/transport.mjs', import.meta.url));
+  await chmod(binary, 0o700);
+  const tunnel = await startTunnel({ server: 'wss://fixture.invalid/tunnel', tokenFile }, { binary, timeoutMs: 3000 });
+  t.after(() => tunnel.close());
+  const record = path.join(directory, 'bundled-handoff.json');
+  assert.equal(await runCodex(tunnel, ['exec', '--record', record, 'fixture'], { model: 'test-model', engine }), 9);
+  const handoff = JSON.parse(await readFile(record, 'utf8'));
+  assert.ok(handoff.args.includes('check_for_update_on_startup=false'));
+  assert.equal(handoff.home, process.env.HOME);
+  assert.equal(handoff.codeHome, process.env.CODEX_HOME);
+  assert.equal(handoff.cwd, process.cwd());
+});
 
 test('official version check is read-only, bounded and never supplies authentication headers', async () => {
   let calls = 0;

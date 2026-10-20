@@ -1,6 +1,6 @@
 {
   "name": "@m9rco/mcodex",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Run the official Codex CLI through an authenticated persistent gateway, with one-time setup.",
   "type": "module",
   "bin": {
@@ -33,9 +33,9 @@
     "@openai/codex": "0.163.0"
   },
   "optionalDependencies": {
-    "@m9rco/mcodex-linux-x64": "0.1.2",
-    "@m9rco/mcodex-linux-arm64": "0.1.2",
-    "@m9rco/mcodex-darwin-arm64": "0.1.2"
+    "@m9rco/mcodex-linux-x64": "0.1.3",
+    "@m9rco/mcodex-linux-arm64": "0.1.3",
+    "@m9rco/mcodex-darwin-arm64": "0.1.3"
   },
   "repository": {
     "type": "git",

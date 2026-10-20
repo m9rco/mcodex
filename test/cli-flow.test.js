@@ -10,6 +10,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { saveState } from '../src/state.js';
 
 const source = fileURLToPath(new URL('..', import.meta.url));
+const packageManifest = JSON.parse(await readFile(path.join(source, 'package.json'), 'utf8'));
+const transportVersion = '0.4.2';
 // Optional HTTPS telemetry must fail locally rather than depend on external DNS.
 // This plain HTTP fixture immediately rejects TLS, while inference uses the
 // separate authenticated transport fixture below.
@@ -48,7 +50,8 @@ function isRunning(pid) {
   }
 }
 
-async function fixture(t, { configured = false, transport = 'normal', codexHolds = false, engineHolds = false, diagnostics = 'legacy', proxyEnv = {} } = {}) {
+async function fixture(t, { configured = false, transport = 'normal', codexHolds = false, engineHolds = false, diagnostics = 'legacy', proxyEnv = {},
+  nativePackageVersion, nativeBinaryVersion = transportVersion, nativeMetadataVersion = transportVersion } = {}) {
   const directory = await mkdtemp('/tmp/mcodex-cli-flow-');
   const context = { directory, events: path.join(directory, 'events.jsonl') };
   t.after(async () => {
@@ -71,14 +74,16 @@ async function fixture(t, { configured = false, transport = 'normal', codexHolds
   const nativeName = `@m9rco/mcodex-${process.platform}-${process.arch}`;
   const native = path.join(application, 'node_modules', '@m9rco', `mcodex-${process.platform}-${process.arch}`);
   await mkdir(path.join(native, 'bin'), { recursive: true });
-  await writeFile(path.join(native, 'package.json'), JSON.stringify({ name: nativeName, exports: { './package.json': './package.json' } }));
+  await writeFile(path.join(native, 'package.json'), JSON.stringify({ name: nativeName, version: nativePackageVersion ?? packageManifest.optionalDependencies[nativeName], mcodex: { transportVersion: nativeMetadataVersion }, exports: { './package.json': './package.json' } }));
   const binary = path.join(native, 'bin', 'mlab-gateway');
+  const diagnosticBody = typeof diagnostics === 'object' ? JSON.stringify(diagnostics)
+    : diagnostics === 'malformed' ? '{"schema_version":1,"connected":true,"hops":null}' : '';
   await writeFile(binary, `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 if (process.argv.length === 3 && process.argv[2] === '--version') {
-  console.log('mlab-gateway 0.4.0');
+  console.log('mlab-gateway ${nativeBinaryVersion}');
   process.exit(0);
 }
 const record = value => appendFileSync(${JSON.stringify(context.events)}, JSON.stringify(value) + '\\n', { mode: 0o600 });
@@ -96,7 +101,7 @@ const server = http.createServer((request, response) => {
   if (request.url === '/diagnostics') {
     if (${JSON.stringify(diagnostics)} === 'blocked') return;
     response.writeHead(${JSON.stringify(diagnostics)} === 'legacy' ? 404 : 200);
-    response.end(${JSON.stringify(diagnostics)} === 'malformed' ? '{"schema_version":1,"connected":true,"hops":null}' : ''); return;
+    response.end(${JSON.stringify(diagnosticBody)}); return;
   }
   catalogCount++;
   if (${JSON.stringify(transport)} === 'blocked' || (${JSON.stringify(transport)} === 'probe-blocked' && catalogCount > 1)) return;
@@ -327,6 +332,44 @@ test('configured interactive mcodex shows connection progress and hands off to t
   assert.ok(result.stderr.search(/Connecting/i) < result.stderr.search(/connected/i));
 });
 
+const currentDiagnostics = { schema_version: 1, connected: true, hops: [], tunnel: { rtt: null }, transport: {
+  protocol: 'mlab-tunnel-v2', server_version: '0.4.2', effective_max_body_bytes: 16 * 1024 * 1024,
+  configured_max_body_bytes: 16 * 1024 * 1024, request_body_budget_bytes: 128 * 1024 * 1024,
+} };
+
+test('interactive startup reports actual engine, transport, gateway and negotiated limits', async t => {
+  const context = await fixture(t, { configured: true, diagnostics: currentDiagnostics });
+  const result = await run(t, context, [], { terminal: true });
+  await assertHandoff(context, result);
+  assert.match(result.stderr, new RegExp(`mcodex ${packageManifest.version.replaceAll('.', '\\.')}`));
+  assert.match(result.stderr, /Codex \d+\.\d+\.\d+; source: bundled/);
+  assert.match(result.stderr, /Native transport: mlab-gateway 0.4.2; source: bundled; package: 0.1.3; bundled match: verified/);
+  assert.match(result.stderr, /Gateway version: 0.4.2/);
+  assert.match(result.stderr, /protocol v2; request-body cap 16.0 MiB/);
+});
+
+test('doctor shows native package and gateway versions and keeps different limits distinct', async t => {
+  const context = await fixture(t, { configured: true, diagnostics: currentDiagnostics });
+  const result = await run(t, context, ['doctor']);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Native transport: mlab-gateway 0.4.2; source: bundled; package: 0.1.3/);
+  assert.match(result.stdout, /Gateway version: 0.4.2/);
+  assert.match(result.stdout, /protocol v2; request-body cap 16.0 MiB/);
+  assert.match(result.stdout, /413 is a transport request-body limit; 400 context_length_exceeded is the model token window; 429 may be a local memory\/concurrency limit or upstream quota/);
+  await assertClean(context);
+});
+
+test('legacy protocol fallback warns that both client and server determine the body cap', async t => {
+  const diagnostics = { ...currentDiagnostics, transport: { ...currentDiagnostics.transport, protocol: 'mlab-tunnel-v1',
+    server_version: null, effective_max_body_bytes: 1024 * 1024 } };
+  const context = await fixture(t, { configured: true, diagnostics });
+  const result = await run(t, context, ['doctor']);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Legacy v1 fallback:.*update both the mcodex native transport and gateway/);
+  assert.match(result.stdout, /Gateway version: unavailable/);
+  await assertClean(context);
+});
+
 test('first interactive invocation completes hidden setup and continues using its already verified transport', async t => {
   const context = await fixture(t);
   const result = await run(t, context, [], { terminal: true, setup: true });
@@ -416,7 +459,7 @@ for (const args of [['engine', 'status'], ['doctor', '--local'], ['--version']])
     assert.equal(result.code, 0);
     assert.match(result.stdout, /Codex \d+\.\d+\.\d+; source: bundled; compatibility: tested/);
     assert.match(result.stdout, /Codex path: .*node_modules\/@openai\/codex\/bin\/codex.js/);
-    if (args[0] === 'doctor') assert.match(result.stdout, /Native transport: mlab-gateway 0.4.0/);
+    if (args[0] === 'doctor') assert.match(result.stdout, /Native transport: mlab-gateway 0.4.2/);
     assert.equal((await events(context)).length, 0);
     await assert.rejects(readFile(context.record), { code: 'ENOENT' });
   });
@@ -439,6 +482,23 @@ test('an invalid selected engine stops before creating a gateway process', async
   assert.equal((await events(context)).length, 0);
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
 });
+
+for (const [description, options, message] of [
+  ['stale native package', { nativePackageVersion: '0.1.1' }, /native transport package does not match mcodex/],
+  ['native binary different from its metadata', { nativeBinaryVersion: '0.3.5' }, /native transport binary does not match its package metadata/],
+]) {
+  test(`${description} fails before connecting or launching Codex`, async t => {
+    const context = await fixture(t, { configured: true, ...options });
+    const before = await readFile(path.join(context.config, 'config.json'), 'utf8');
+    const result = await run(t, context, ['exec', '--json', 'fixture prompt']);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, message);
+    assert.equal((await events(context)).length, 0);
+    assert.equal(await readFile(path.join(context.config, 'config.json'), 'utf8'), before);
+    await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  });
+}
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   test(`${signal} during a local engine version check terminates its process without a gateway`, async t => {

@@ -1,5 +1,8 @@
-export function providerArguments({ origin, model }) {
+export function providerArguments({ origin, model, engine }) {
   const values = {
+    // The official updater installs a separate global Codex. The exact bundled
+    // engine is maintained with mcodex; explicitly selected engines own updates.
+    ...(engine?.source === 'bundled' ? { check_for_update_on_startup: false } : {}),
     model_provider: 'mcodex',
     model,
     'model_providers.mcodex.name': 'mcodex gateway',

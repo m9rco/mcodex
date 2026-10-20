@@ -9,9 +9,9 @@ Source: https://github.com/openai/codex
 
 The optional native packages bundle MLab Gateway, Copyright (c) 2026 mlab,
 under the MIT License. The wrapper invokes only its client transport mode.
-Linux x64 and ARM64 use the public v0.4.1 release assets:
-https://github.com/m9rco/mlab-gateway-client/releases/tag/v0.4.1
-The macOS ARM64 build uses the same MLab Gateway v0.4.1 code line.
+Linux x64 and ARM64 use the public v0.4.2 release assets:
+https://github.com/m9rco/mlab-gateway-client/releases/tag/v0.4.2
+The macOS ARM64 build uses the same MLab Gateway v0.4.2 code line.
 Its default example endpoint is gateway.example; the wrapper always supplies
 the user's configured server URL explicitly.
 
