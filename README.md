@@ -6,10 +6,10 @@
 
 需要 Node.js 22 或更新版本。支持 Linux x64、Linux ARM64 和 macOS ARM64。npm 包名为 `@m9rco/mcodex`，安装后的命令为 `mcodex`。
 
-当前修复版 **0.2.1** 已在 npm 和 GitHub 公开发布，三个平台包均已核对实际下载摘要。安装或升级后运行 `mcodex doctor --local` 核对实际版本。
+npm 修复版 **0.2.3** 包含工作目录与配置传递修复，沿用三个已验证的原生平台包 0.1.3。安装或升级后运行 `mcodex doctor --local` 核对实际版本。
 
 ```sh
-npm install -g @m9rco/mcodex@0.2.1
+npm install -g @m9rco/mcodex@0.2.3
 mcodex doctor --local
 mcodex
 ```
@@ -27,7 +27,7 @@ mcodex
 
 如果安装过旧的未加 scope 包，先运行 `npm uninstall -g mcodex`，再安装 `@m9rco/mcodex`，避免同名命令冲突。卸载旧安装包会保留 mcodex 的连接配置。
 
-GitHub Release 脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22。可重复运行升级，连接设置保留：
+GitHub Release 一键脚本当前固定为 **0.2.1**，尚不包含 0.2.3 的目录修复；需要修复请使用上面的 npm 命令。该脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22，连接设置保留：
 
 ```sh
 curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.1/install.sh | sh
@@ -119,7 +119,7 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.2.1`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.3`，npm 根据系统和 CPU 安装对应包。
+主包为 `@m9rco/mcodex@0.2.3`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.3`，npm 根据系统和 CPU 安装对应包。
 
 维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.4.2`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
 
@@ -131,7 +131,7 @@ npm pack ./packages/mcodex-darwin-arm64
 npm pack
 ```
 
-主包和原生包分别维护版本。`v0.2.1` Release 使用 `m9rco-mcodex-0.2.1.tgz` 与三个 `0.1.3` 原生 tarball，原生转发程序为 0.4.2。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
+npm 主包、原生包和 GitHub 归档分别维护版本；`scripts/github-release.json` 记录现有安装脚本对应的归档版本，npm 单独发版不移动已冻结的 GitHub 归档；只有对应 GitHub 资产就绪后，才同步此清单及两份安装脚本。`v0.2.1` Release 使用 `m9rco-mcodex-0.2.1.tgz` 与三个 `0.1.3` 原生 tarball，原生转发程序为 0.4.2。`scripts/install.sh` 是该 Release 的公开一键安装脚本，安装时校验主包和当前平台包，保留已有连接设置。不要发布本地配置、测试 Token、构建缓存或 OAuth 文件。架构和验收范围见 [提案](docs/PROPOSAL.md)，第三方组件见 [NOTICE](NOTICE)。
 
 npm 发布后需等待公开下载并校验冻结 tarball，不能以提交回执或两步验证完成作为发行成功。运行 `node scripts/verify-published.mjs --directory <冻结目录>`；有限等待和状态排查方法见 [发布后验证](docs/RELEASE-VERIFICATION.md)。
 
