@@ -5,7 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { startTunnel, runCodex, nativePackage, resolveNative, inspectNative, codexEnvironment } from '../src/tunnel.js';
-import { providerArguments, chooseModel } from '../src/provider.js';
+import { providerArguments, chooseModel, codexArguments } from '../src/provider.js';
 
 const binary = fileURLToPath(new URL('fixtures/transport.mjs', import.meta.url));
 const codexEntry = fileURLToPath(new URL('fixtures/codex.mjs', import.meta.url));
@@ -116,6 +116,32 @@ test('provider uses Responses with no automatic replay; model must exist in the 
   assert.throws(() => chooseModel([]), /no available models/);
   assert.equal(nativePackage('linux', 'arm64'), '@m9rco/mcodex-linux-arm64');
   assert.throws(() => nativePackage('win32', 'x64'), /Unsupported platform/);
+});
+
+test('Codex config overrides share one scope across subcommands and stop at --', () => {
+  const defaults = ['-c', 'model_provider="mcodex"', '-c', 'allow_login_shell=false'];
+  for (const override of [
+    ['-c', 'allow_login_shell=true'], ['--config', 'allow_login_shell=true'],
+    ['--config=allow_login_shell=true'], ['-callow_login_shell=true'], ['-c=allow_login_shell=true'],
+  ]) {
+    assert.deepEqual(codexArguments(defaults, ['exec', ...override, 'prompt']),
+      [...defaults, '-c', 'allow_login_shell=true', 'exec', 'prompt']);
+  }
+  assert.deepEqual(codexArguments(defaults, ['-c', 'x=1', 'exec', 'resume', '--last', '-c', 'x=2', '--', '-c', 'literal']),
+    [...defaults, '-c', 'x=1', '-c', 'x=2', 'exec', 'resume', '--last', '--', '-c', 'literal']);
+  assert.deepEqual(codexArguments(defaults, ['exec', '--', '--config=x=1']), [...defaults, 'exec', '--', '--config=x=1']);
+  assert.throws(() => codexArguments(defaults, ['exec', '-c']), /Missing value/);
+  assert.throws(() => codexArguments(defaults, ['exec', '--config', '--json']), /Missing value/);
+  for (const command of [
+    ['sandbox', 'bash', '-c', 'pwd'],
+    ['sandbox', '/bin/echo', '--config=literal'],
+    ['mcp', 'add', 'fixture', 'bash', '-c', 'pwd'],
+  ]) {
+    assert.deepEqual(codexArguments(defaults, command), [...defaults, ...command]);
+    assert.deepEqual(codexArguments(defaults, ['--model', 'sandbox', ...command]), [...defaults, '--model', 'sandbox', ...command]);
+  }
+  assert.deepEqual(codexArguments(defaults, ['--cd', 'sandbox', 'exec', '-c', 'x=1', 'prompt']),
+    [...defaults, '-c', 'x=1', '--cd', 'sandbox', 'exec', 'prompt']);
 });
 
 test('only the exact bundled engine suppresses the separate official updater', () => {

@@ -66,6 +66,8 @@ mcodex exec "解释这个仓库的入口"
 
 `login`、`logout`、`doctor`、`engine` 和包装器帮助命令由 mcodex 处理；其他命令和参数转交官方 Codex。模型、工作目录、沙箱和审批选项仍通过 Codex 参数控制，例如 `mcodex --model <模型名>`。
 
+在项目目录运行 `mcodex` 即使用该目录；也可用 `mcodex --cd /home/pushaowei` 明确选择。mcodex 默认给模型的 shell 工具设置 `allow_login_shell=false`，避免登录配置中的 `cd` 在命令执行前把目录切回 `/root` 等主目录。已有终端环境会继承；需要重新加载登录配置时可显式传 `-c allow_login_shell=true`。`mcodex doctor --local` 显示启动目录、`HOME` 和 `CODEX_HOME`，便于区分工作区与用户配置目录；详细复现与限制见[目录漂移排查](docs/ENGINE-AND-CONTEXT.md#工作目录与-shell-启动配置)。
+
 ## 工作方式
 
 ```mermaid

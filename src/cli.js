@@ -48,8 +48,21 @@ MCODEX_CODEX_BIN explicitly selects a separate Codex executable or JS launcher.
 Unset MCODEX_CODEX_BIN to return to the tested bundled engine.
 MCODEX_NATIVE_BIN explicitly selects a native transport; unset it to use the matched bundled package.
 Codex arguments and its existing sandbox/approval settings remain available.
+Codex starts in the calling directory; use --cd <path> to select another workspace.
+Shell commands default to non-login mode to avoid login profiles changing directories.
+Use -c allow_login_shell=true to explicitly restore login-shell behavior.
 Login opens Codex when both standard input and output are terminals.
 `;
+
+function formatWorkspace() {
+  return [
+    `Launch directory: ${JSON.stringify(process.cwd())}`,
+    `HOME: ${JSON.stringify(process.env.HOME ?? '(unset)')}`,
+    `CODEX_HOME: ${JSON.stringify(process.env.CODEX_HOME ?? '(default under user home)')}`,
+    'Shell default: non-login (allow_login_shell=false); explicit -c overrides apply.',
+    'The launch directory is independent of HOME. --cd and resumed-session directory choices are handled by Codex.',
+  ];
+}
 
 function formatNative(native, { path: showPath = false } = {}) {
   if (!native) return ['Native transport version: unavailable.'];
@@ -132,6 +145,7 @@ async function launchCodex(tunnel, args, model, signal, engine) {
   if (!engine.tested) console.error(`mcodex: Warning: explicitly selected Codex ${engine.version} has not passed the compatibility suite; unset MCODEX_CODEX_BIN to use the bundled engine.`);
   if (process.stderr.isTTY) {
     formatEngine(engine).forEach(line => console.error(`mcodex: ${line}`));
+    console.error(`mcodex: Launch directory: ${JSON.stringify(process.cwd())}; Codex --cd/resume choices still apply.`);
     console.error('mcodex: Gateway connected. Starting Codex...');
   }
   return runCodex(tunnel, args, { model, signal, engine });
@@ -205,6 +219,7 @@ export async function main(args) {
   }
   if (args[0] === 'doctor' && args[1] === '--local' && args.length === 2) {
     return localCommand(async signal => {
+      formatWorkspace().forEach(line => console.log(line));
       formatEngine(await resolveEngine({ signal })).forEach(line => console.log(line));
       formatNative(await inspectNative({ signal }), { path: true }).forEach(line => console.log(line));
       console.log(`Node ${process.version}; local checks only; no gateway connection.`);
@@ -274,6 +289,7 @@ export async function main(args) {
     }
     if (args[0] === 'doctor') {
       if (args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
+      formatWorkspace().forEach(line => console.log(line));
       console.log(`mcodex: Node ${process.version}; native transport and official Codex installed.`);
       formatEngine(engine).forEach(line => console.log(line));
       formatNative(tunnel.native, { path: true }).forEach(line => console.log(line));

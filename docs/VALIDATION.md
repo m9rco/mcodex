@@ -127,3 +127,13 @@ SG 已部署 0.4.2、服务 active，保留二进制与配置的成对回滚副�
 2026-10-21，三个平台包 0.1.3 先完成公开下载与摘要校验，再提交主包 0.2.1。npm 生命周期从 validating 转为 published 后，完整匿名发行检查退出 0：四个包的公开 metadata、latest 标签、SHA-512 integrity 与实际 tarball 下载全部匹配冻结文件。发布使用隔离的官方 npm 12.2.0 和进程内 CLI 层凭据，每次请求有明确超时；没有更改全局 npm 或保存发布 Token。GitHub v0.2.1 的标签、归档及 SHA256SUMS 保持冻结，发行后文档单独更新。
 
 最终 npm 安装验收：干净 Linux ARM64 和 Linux x64 QEMU Docker 均使用空缓存、全新 prefix，匿名从 registry.npmjs.org 执行精确版本 `npm install -g @m9rco/mcodex@0.2.1`，分别约 24 秒和 54 秒完成，退出 0。两者实际主包 0.2.1、对应原生包 0.1.3、原生二进制 0.4.2、官方 Codex 0.163.0，`doctor --local` 显示 bundled match verified。二进制 SHA-256 同时匹配 npm 包 metadata 和冻结资产；没有本地 tarball/GitHub 回退、生产凭据、网关连接或模型调用，容器已清理。x64 QEMU 的结果限定为安装、版本和本地诊断，不扩展到原生性能或 OS 沙箱验收。
+
+## 工作目录修复验收（未发布）
+
+2026-10-22：修复模型工具在无 shell snapshot 路径执行登录配置后切回 HOME 的问题，默认设置 `allow_login_shell=false`。同时修复 `exec -c ...` 覆盖根级配置、丢失网关设置的问题；保留显式配置顺序、`--` 字面参数和 sandbox/mcp 外部命令的 argv。新增启动/doctor 目录信息，HOME/CODEX_HOME 不变。
+
+- Node 全套测试 113/113 通过，语法与 diff 检查通过。
+- 真实官方 Codex 0.163.0 在禁网 Linux ARM64 Docker 中 10/10 通过；0.162.1 和 0.163.0 在 macOS 本地 fixture 中也各 10/10 通过。
+- 测试通过生产 `runCodex`，验证登录 shell 的失败对照、禁用/默认快照、三种目录参数、`exec` 后和混合位置的配置、连写参数、最后用户值优先以及实际本机相对文件读取。固定工具显式选择 Bash，避免系统默认 shell 差异影响夹具。
+- Linux 容器没有外网；本地测试仅将推理路由到 loopback，不宣称官方引擎的插件等辅助请求全部离线。测试固定命令使用独立 HOME/CODEX_HOME 并关闭 OS 沙箱，不构成生产沙箱验收。
+- 已在隔离容器复现 `/home/pushaowei` 启动、`HOME=/root`、登录配置切回 `/root` 的具体机制；没有检查用户报错机器的实际 profile，故不声称排除了其他目录问题。本次不更新 npm 版本或远端安装。

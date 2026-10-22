@@ -1,4 +1,4 @@
-name: Official Codex engine launch checks (protocol acceptance is separate)
+name: Official Codex engine launch and workspace checks (protocol acceptance is separate)
 
 on:
   push:
@@ -37,6 +37,10 @@ jobs:
           MCODEX_CODEX_BIN: ${{ runner.temp }}/codex-engine/node_modules/@openai/codex/bin/codex.js
         run: node bin/mcodex.js engine status
       - run: node --test test/engine.test.js test/tunnel.test.js test/cli-flow.test.js
+      - name: Verify real engine workspace and login-shell behavior with loopback inference
+        env:
+          MCODEX_WORKSPACE_TEST_CODEX_BIN: ${{ runner.temp }}/codex-engine/node_modules/@openai/codex/bin/codex.js
+        run: node scripts/verify-workspace.mjs
 
   inspect-candidate:
     if: github.event_name == 'workflow_dispatch'

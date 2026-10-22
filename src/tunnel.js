@@ -183,12 +183,14 @@ export function codexEnvironment(localKey, env = process.env) {
 }
 
 export async function runCodex(tunnel, args, { model, engine, codexEntry, signal } = {}) {
-  const { providerArguments } = await import('./provider.js');
+  const cwd = process.cwd();
+  const { providerArguments, codexArguments } = await import('./provider.js');
   signal?.throwIfAborted();
   engine ??= codexEntry ? engineCommand(codexEntry) : await resolveEngine({ signal });
   signal?.throwIfAborted();
   if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error('The native transport stopped before Codex could start.');
-  const child = spawn(engine.command, [...engine.prefix, ...providerArguments({ origin: tunnel.origin, model, engine }), ...args], {
+  const child = spawn(engine.command, [...engine.prefix, ...codexArguments(providerArguments({ origin: tunnel.origin, model, engine }), args)], {
+    cwd,
     stdio: 'inherit',
     env: codexEnvironment(tunnel.key),
   });

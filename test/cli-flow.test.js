@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -150,6 +150,9 @@ const baseKeys = new Set(${JSON.stringify(Object.keys(env))});
 const token = ${JSON.stringify(token)};
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({
   pid: process.pid,
+  cwd: process.cwd(),
+  home: process.env.HOME,
+  codeHome: process.env.CODEX_HOME,
   args: process.argv.slice(2),
   addedEnvironmentKeys: Object.keys(process.env).filter(key => !baseKeys.has(key)).sort(),
   connectionTokenInEnvironment: Object.values(process.env).some(value => value.includes(token)),
@@ -190,10 +193,10 @@ process.stdin.setRawMode = value => { process.stdin.isRaw = value; return proces
   return Object.assign(context, { application, config, record, env, preloads, tokenFile });
 }
 
-async function run(t, context, args, { terminal = false, setup = false, interruptAt, signal = 'SIGTERM' } = {}) {
+async function run(t, context, args, { terminal = false, setup = false, interruptAt, signal = 'SIGTERM', cwd } = {}) {
   const preload = terminal === true ? context.preloads.terminal : context.preloads[terminal];
   const argv = [...(preload ? ['--import', preload] : []), path.join(context.application, 'bin', 'mcodex.js'), ...args];
-  const child = spawn(process.execPath, argv, { env: context.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, argv, { cwd, env: context.env, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => child.kill('SIGKILL'));
   let stdout = '';
   let stderr = '';
@@ -625,4 +628,42 @@ test('actual Codex child preserves inherited proxy settings and merges uppercase
   const result = await run(t, context, ['exec', '--json', 'fixture prompt']);
   const child = await assertHandoff(context, result);
   assert.equal(child.proxyBypass.uppercase, 'upper.example,localhost,lower.example,127.0.0.1,::1');
+});
+
+test('workspace stays separate from HOME during saved startup, first login and explicit directory forwarding', async t => {
+  for (const configured of [true, false]) {
+    const context = await fixture(t, { configured, proxyEnv: { HOME: 'fixture', CODEX_HOME: 'fixture', PWD: 'fixture' } });
+    const workspace = path.join(await realpath(context.directory), 'workspace with spaces');
+    await mkdir(workspace);
+    context.env.HOME = path.join(context.directory, 'separate-home');
+    context.env.CODEX_HOME = path.join(context.directory, 'separate-codex-home');
+    context.env.PWD = context.env.HOME;
+    const args = configured ? ['exec', '--cd', './child directory', '-c', 'allow_login_shell=true', 'fixture prompt'] : [];
+    const result = await run(t, context, args, { cwd: workspace, terminal: true, setup: !configured });
+    const child = await assertHandoff(context, result);
+    assert.equal(child.cwd, workspace);
+    assert.equal(child.home, context.env.HOME);
+    assert.equal(child.codeHome, context.env.CODEX_HOME);
+    assert.ok(child.args.includes('allow_login_shell=false'));
+    if (configured) {
+      assert.deepEqual(child.args.slice(-4), ['exec', '--cd', './child directory', 'fixture prompt']);
+      assert.ok(child.args.indexOf('allow_login_shell=true') > child.args.indexOf('allow_login_shell=false'));
+      assert.ok(child.args.indexOf('allow_login_shell=true') < child.args.indexOf('exec'));
+    }
+    assert.ok(result.stderr.includes(`Launch directory: ${JSON.stringify(workspace)}`));
+  }
+});
+
+test('local doctor reports launch directory and independent home paths without a gateway', async t => {
+  const context = await fixture(t);
+  const workspace = path.join(await realpath(context.directory), 'workspace');
+  await mkdir(workspace);
+  context.env.HOME = path.join(context.directory, 'home');
+  context.env.CODEX_HOME = path.join(context.directory, 'codex-home');
+  const result = await run(t, context, ['doctor', '--local'], { cwd: workspace });
+  assert.equal(result.code, 0);
+  for (const [label, value] of [['Launch directory', workspace], ['HOME', context.env.HOME], ['CODEX_HOME', context.env.CODEX_HOME]]) {
+    assert.ok(result.stdout.includes(`${label}: ${JSON.stringify(value)}`));
+  }
+  assert.equal((await events(context)).length, 0);
 });

@@ -3,6 +3,11 @@ export function providerArguments({ origin, model, engine }) {
     // The official updater installs a separate global Codex. The exact bundled
     // engine is maintained with mcodex; explicitly selected engines own updates.
     ...(engine?.source === 'bundled' ? { check_for_update_on_startup: false } : {}),
+    // Login startup files can cd to HOME after the executor sets its workdir,
+    // especially when shell snapshots are disabled or unavailable. Inherit the
+    // caller's environment without rerunning login profiles. User -c overrides
+    // follow these defaults and can explicitly opt back in.
+    allow_login_shell: false,
     model_provider: 'mcodex',
     model,
     'model_providers.mcodex.name': 'mcodex gateway',
@@ -28,4 +33,52 @@ export function chooseModel(models, requested) {
   const model = preferred.find(id => ids.includes(id)) ?? ids[0];
   if (!model) throw new Error('The gateway returned no available models.');
   return model;
+}
+
+// Codex's global repeatable -c flag is replaced, not merged, when a subcommand
+// also supplies -c. Hoist user overrides into the same scope as our defaults,
+// retaining their order and treating everything after -- as literal arguments.
+export function codexArguments(defaults, args) {
+  const overrides = [];
+  const forwarded = [];
+  // These root options consume the next token even when it names a command.
+  const valueOptions = new Set(['-m', '--model', '-p', '--profile', '-C', '--cd',
+    '-s', '--sandbox', '-a', '--ask-for-approval', '-i', '--image', '--add-dir',
+    '--enable', '--disable', '--local-provider', '--remote', '--remote-cwd', '--remote-auth-token-env']);
+  let commandSeen = false;
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === '--') {
+      forwarded.push(...args.slice(index));
+      break;
+    }
+    if (!commandSeen && valueOptions.has(argument)) {
+      forwarded.push(argument);
+      if (index + 1 < args.length) forwarded.push(args[++index]);
+      continue;
+    }
+    if (!commandSeen && !argument.startsWith('-')) {
+      commandSeen = true;
+      // These commands can own a trailing external argv without a -- marker.
+      // Its bash -c (or executable --config) belongs to the external program.
+      if (argument === 'sandbox' || argument === 'mcp') {
+        forwarded.push(...args.slice(index));
+        break;
+      }
+    }
+    let value;
+    if (argument === '-c' || argument === '--config') {
+      value = args[++index];
+      if (!value || value.startsWith('-')) throw new Error(`Missing value for ${argument}.`);
+    } else if (argument.startsWith('--config=')) {
+      value = argument.slice('--config='.length);
+    } else if (argument.startsWith('-c') && !argument.startsWith('--')) {
+      value = argument.slice(2).replace(/^=/, '');
+    } else {
+      forwarded.push(argument);
+      continue;
+    }
+    overrides.push('-c', value);
+  }
+  return [...defaults, ...overrides, ...forwarded];
 }

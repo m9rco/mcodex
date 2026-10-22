@@ -16,7 +16,30 @@ unset MCODEX_CODEX_BIN
 
 这让你可以先独立试用新 Codex，再决定是否切换。未验收的显式外部版本会提示未知兼容状态，不能视为已通过协议测试。每次 mcodex 默认引擎更新前，维护者需运行真实官方 CLI 的工具调用、SSE、本地压缩、resume 和取消测试；启动版本检查只是其中一部分。公开仓库的引擎工作流检查实际启动，私有网关仓库负责完整协议矩阵。没有自动安装或自动激活最新版本的机制。捆绑引擎启动时覆盖 `check_for_update_on_startup=false`，避免官方提示的 `npm install -g @openai/codex` 更新到无关的全局安装；显式外部引擎不覆盖该设置。
 
-私有仓库的手动候选工作流接受明确的官方版本，在隔离 npm 安装后校验实际 `--version`，再运行工具调用、SSE、本地压缩、resume、取消和无重放测试。候选通过也不会自动改默认版本或兼容白名单，维护者仍需审核并提交。公开仓库的引擎工作流只检查版本识别和启动，不能代替完整协议测试。
+私有仓库的手动候选工作流接受明确的官方版本，在隔离 npm 安装后校验实际 `--version`，再运行工具调用、SSE、本地压缩、resume、取消和无重放测试。候选通过也不会自动改默认版本或兼容白名单，维护者仍需审核并提交。公开仓库的引擎矩阵检查版本识别、启动和本地工作目录回归，不能代替完整协议测试。
+
+## 工作目录与 shell 启动配置
+
+mcodex 的 Codex 子进程从调用时的实际工作目录启动；`HOME` 和 `CODEX_HOME` 用于用户配置，不作为工作目录。`--cd` / `-C` 原样交给 Codex，resume 也保留官方的目录选择流程，不强行覆盖恢复会话的目录。交互启动显示的是启动目录，显式 `--cd` 或 resume 的选择可能使实际会话目录不同。
+
+已在隔离 Linux 容器中用官方 Codex 0.163.0 复现：从 `/home/pushaowei` 启动、`HOME=/root`，登录配置执行 `cd /root`，同时禁用 shell snapshot。模型收到的 `<cwd>` 正确，但工具的 `bash -lc` 在初始化后进入 `/root`，相对路径读取失败。仅把 `allow_login_shell` 改为 `false` 后，`bash -c` 保持工作目录并正确读取文件。正常生成的默认 snapshot 能保护该测试的目录；仅有 `HOME=/root` 或过时的 `PWD` 并不会必然导致故障。未检查具体机器的 profile 时，不能将该复现视为其唯一原因。
+
+mcodex 因此默认通过进程参数设置 `allow_login_shell=false`，避免模型工具在无快照路径重新执行登录配置。它不修改用户的配置文件、主目录、沙箱或审批策略。当前终端导出的环境仍会继承；只定义在登录配置中的变量/函数可能不再可用。需要原行为时，显式运行 `mcodex -c allow_login_shell=true`，并确保登录配置不无条件切目录。非登录启动文件（如 `BASH_ENV`、`.zshenv`）以及命令本身仍可切换目录，这不是工作目录锁定机制。
+
+同时修复了配置作用域问题：官方 0.163.0 在 `exec` 后收到 `-c` 时，会替换根级的整组 `-c`，连包装器的网关和 shell 配置也会丢失。mcodex 现在将用户的 `-c`/`--config`（含连写形式）与包装器默认值放在同一作用域，用户配置按原顺序后置，最后一个值优先。`--` 后的字面参数保持不变。这使 `mcodex exec -c features.shell_snapshot=false ...` 也能保持网关路由和工作目录修复。
+
+已有版本可临时运行：
+
+```sh
+cd /home/pushaowei
+mcodex --cd /home/pushaowei -c allow_login_shell=false
+```
+
+新代码的 `mcodex doctor --local` 无需连接网关，即显示启动目录、`HOME`、`CODEX_HOME` 和包装器 shell 默认值。仍有目录问题时，比较会话 `<cwd>`、工具的 `pwd`、`--cd`/resume 选择和实际引擎版本；不要用改 `HOME` 的方式纠正工作区，这可能导致登录、技能和历史记录加载位置变化。
+
+维护者可运行 `node scripts/verify-workspace.mjs`：本机 Responses fixture 给真实引擎发送固定的 `pwd` 和文件读取工具调用，不调用模型。通过 `MCODEX_WORKSPACE_TEST_CODEX_BIN` 指定待测官方引擎。该测试在临时目录与独立配置下运行，覆盖登录 shell 失败对照、无快照路径、默认快照和三种显式目录参数；它仅为固定测试命令关闭 OS 沙箱，不作为沙箱兼容性验证，也不改变 mcodex 的生产审批设置。
+
+官方行为依据：[shell 参数构造](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/shell.rs)、[shell snapshot](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/shell_snapshot.rs)。
 
 ## OpenSpec
 
