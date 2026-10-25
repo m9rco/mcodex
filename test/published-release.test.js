@@ -20,9 +20,10 @@ test('platform-only gate flag can precede or follow value options without consum
   assert.throws(() => parseOptions(['--unknown']), /Unknown option/);
 });
 
-async function registryFixture(t, { availableAfter = 0, wrongArtifact = false } = {}) {
+async function registryFixture(t, { availableAfter = 0, wrongArtifact = false, main = false, missingReadme = false } = {}) {
   const artifact = Buffer.from('frozen reviewed tarball fixture');
-  const expected = { name: '@m9rco/mcodex-linux-x64', version: '0.1.1', integrity: `sha512-${createHash('sha512').update(artifact).digest('base64')}` };
+  const expected = { name: main ? '@m9rco/mcodex' : '@m9rco/mcodex-linux-x64', version: '0.1.1', integrity: `sha512-${createHash('sha512').update(artifact).digest('base64')}`,
+    ...(main ? { readme: '# mcodex\n\nnpm install -g @m9rco/mcodex\n' } : {}) };
   let metadataReads = 0;
   const server = createServer((request, response) => {
     const path = new URL(request.url, registry).pathname;
@@ -30,7 +31,7 @@ async function registryFixture(t, { availableAfter = 0, wrongArtifact = false } 
     metadataReads++;
     const available = metadataReads > availableAfter;
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ 'dist-tags': { latest: available ? expected.version : '0.1.0' }, versions: available ? {
+    response.end(JSON.stringify({ readme: missingReadme ? undefined : expected.readme, 'dist-tags': { latest: available ? expected.version : '0.1.0' }, versions: available ? {
       [expected.version]: { name: expected.name, version: expected.version, dist: { integrity: expected.integrity, tarball: `${registry}artifact.tgz` } },
     } : {} }));
   });
@@ -59,4 +60,11 @@ test('public verifier fails rather than accepting a mismatched downloaded artifa
 test('public verifier bounds waiting for a version that never becomes available', async t => {
   const fixture = await registryFixture(t, { availableAfter: Infinity });
   await assert.rejects(verifyPublished([fixture.expected], { registry: fixture.registry, timeoutMs: 80, intervalMs: 10 }), /verification timed out/);
+});
+
+test('main package verification requires the public README to match the frozen archive', async t => {
+  const missing = await registryFixture(t, { main: true, missingReadme: true });
+  await assert.rejects(verifyPublished([missing.expected], { registry: missing.registry, timeoutMs: 120, intervalMs: 10 }), /public README not updated/);
+  const complete = await registryFixture(t, { main: true });
+  assert.match((await verifyPublished([complete.expected], { registry: complete.registry, timeoutMs: 2000 }))[0], /frozen archive verified/);
 });

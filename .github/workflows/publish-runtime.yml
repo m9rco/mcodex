@@ -1,0 +1,106 @@
+name: Build and publish independent runtime
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/*runtime*'
+      - 'test/runtime-update.test.js'
+      - '.github/workflows/publish-runtime.yml'
+  push:
+    tags: ['runtime-v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish signed assets and advance the stable channel
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcodex-runtime-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-14
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Validate the runtime release tag
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          RELEASE_EVENT: ${{ github.event_name }}
+        run: |
+          VERSION=$(node -p "require('./scripts/runtime-release.json').version")
+          if [ "$RELEASE_EVENT" = push ] && [ "$RELEASE_REF" != "runtime-v$VERSION" ]; then
+            echo 'Tag does not match the runtime version'; exit 1
+          fi
+      - run: npm ci --omit=optional --ignore-scripts
+      - run: npm run check && npm test
+      - run: node scripts/build-runtime.mjs --output "$RUNNER_TEMP/runtime-dist"
+      - run: node scripts/verify-runtime-artifact.mjs "$RUNNER_TEMP/runtime-dist" --workspace
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-${{ matrix.target }}
+          path: ${{ runner.temp }}/runtime-dist/
+          retention-days: 30
+
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: runtime-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: runtime-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/runtime-dist/
+      - name: Sign the verified platform assets
+        env:
+          MCODEX_RUNTIME_SIGNING_KEY: ${{ secrets.MCODEX_RUNTIME_SIGNING_KEY }}
+        run: node scripts/sign-runtime-release.mjs "$RUNNER_TEMP/runtime-dist"
+      - name: Publish immutable assets before advancing the signed channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./scripts/runtime-release.json').version")
+          TAG="runtime-v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Resume a failed publish only with the original frozen build assets.
+            node scripts/verify-runtime-publication.mjs "$RUNNER_TEMP/runtime-dist"
+          else
+            gh release create "$TAG" "$RUNNER_TEMP"/runtime-dist/*.tar.gz "$RUNNER_TEMP/runtime-dist/channel.json" --target "$GITHUB_SHA" --draft --title "mcodex runtime $VERSION" --notes 'Verified independent runtime. Install with mcodex update.'
+            gh release edit "$TAG" --draft=false
+            node scripts/verify-runtime-publication.mjs "$RUNNER_TEMP/runtime-dist"
+          fi
+          if ! gh release view runtime-stable >/dev/null 2>&1; then
+            gh release create runtime-stable --target "$GITHUB_SHA" --prerelease --title 'mcodex signed stable runtime channel' --notes 'Signed channel metadata; platform assets are stored in immutable runtime version releases.'
+          fi
+          gh release upload runtime-stable "$RUNNER_TEMP/runtime-dist/channel.json" --clobber
+          node scripts/verify-runtime-publication.mjs "$RUNNER_TEMP/runtime-dist" --channel

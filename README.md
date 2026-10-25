@@ -6,13 +6,25 @@
 
 需要 Node.js 22 或更新版本。支持 Linux x64、Linux ARM64 和 macOS ARM64。npm 包名为 `@m9rco/mcodex`，安装后的命令为 `mcodex`。
 
-npm 修复版 **0.2.3** 包含工作目录与配置传递修复，沿用三个已验证的原生平台包 0.1.3。安装或升级后运行 `mcodex doctor --local` 核对实际版本。
+npm 提供稳定启动器和可用的基线版本。启动器 0.3.0 起支持独立运行包更新；0.2.x 用户需通过 npm 完成一次迁移。安装或升级后运行 `mcodex doctor --local` 核对启动器、运行包和依赖版本。
 
 ```sh
-npm install -g @m9rco/mcodex@0.2.3
+npm install -g @m9rco/mcodex
 mcodex doctor --local
 mcodex
 ```
+
+运行包管理命令（需要启动器 0.3.0+）：
+
+```sh
+mcodex runtime status
+mcodex update --check
+mcodex update
+mcodex rollback
+mcodex rollback --bundled
+```
+
+正常启动使用本地已验证版本，不在线检查更新；`update` 和 `update --check` 才会访问运行包发行源。更新通过签名、完整文件摘要和本地健康检查后切换，保留旧目录供现有会话和回退使用。下载或健康检查失败保留当前版本。`MCODEX_RUNTIME_DIR` 可指定独立缓存目录；连接配置、HOME 和 CODEX_HOME 保持原位置。详见 [独立运行包与首次启用](docs/RUNTIME-UPDATES.md)。
 
 首次在终端运行 `mcodex` 或 `mcodex login`，会询问网关地址和连接 Token，验证成功后直接进入 Codex，无需再运行一次命令。以后运行 `mcodex` 就会直接连接并启动。Token 输入不会回显。这里使用网关签发的连接 Token，远端的订阅 OAuth 凭据由网关保管。
 
@@ -27,7 +39,7 @@ mcodex
 
 如果安装过旧的未加 scope 包，先运行 `npm uninstall -g mcodex`，再安装 `@m9rco/mcodex`，避免同名命令冲突。卸载旧安装包会保留 mcodex 的连接配置。
 
-GitHub Release 一键脚本当前固定为 **0.2.1**，尚不包含 0.2.3 的目录修复；需要修复请使用上面的 npm 命令。该脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22，连接设置保留：
+GitHub Release 一键脚本当前固定为 **0.2.1**，需要工作目录修复和新启动器功能请使用上面的 npm 命令。该脚本识别平台、下载并核对 SHA-256，再用 npm 安装；同样需要 Node.js 22，连接设置保留：
 
 ```sh
 curl -fsSL https://github.com/m9rco/mcodex/releases/download/v0.2.1/install.sh | sh
@@ -87,7 +99,7 @@ mcodex 使用本机随机端口和临时 API Key，通过官方 Codex 的自定�
 
 主要收益是安装和使用更简单。请求的数据通路仍是原来的 Rust WSS 长连接，Node.js 不参与逐块转发。首次连接和启动进程仍有开销；模型生成速度取决于网络、网关和上游模型，套壳本身不会让模型生成更快。
 
-此版本默认捆绑已验证的 `@openai/codex@0.163.0` 和各平台 Rust 转发程序。可通过 `MCODEX_CODEX_BIN` 显式使用独立安装的官方 Codex，让引擎与包装器分别升级；默认不会自动跟随系统 PATH 或最新版。见下方说明。安装过程中无需编译 Rust，也没有下载二进制的 `postinstall` 脚本。Windows 暂未支持。
+npm 基线捆绑已验证的 `@openai/codex@0.163.0` 和各平台 Rust 转发程序。可通过 `MCODEX_CODEX_BIN` 显式使用独立安装的官方 Codex，让引擎与包装器分别升级；默认不会自动跟随系统 PATH 或最新版。见下方说明。安装过程中无需编译 Rust，也没有下载二进制的 `postinstall` 脚本。Windows 暂未支持。
 
 Linux 本机工具需要系统允许官方 Codex 创建沙箱。Docker 默认限制可能阻止嵌套沙箱；具体测试条件与平台覆盖见 [验收记录](docs/VALIDATION.md)。
 
@@ -119,7 +131,7 @@ npm ci --omit=optional --ignore-scripts
 npm test
 ```
 
-主包为 `@m9rco/mcodex@0.2.3`。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.3`，npm 根据系统和 CPU 安装对应包。
+主包 `@m9rco/mcodex` 作为稳定启动器，默认依赖仅用于基线回退。三个可选平台包为 `@m9rco/mcodex-linux-x64`、`@m9rco/mcodex-linux-arm64`、`@m9rco/mcodex-darwin-arm64`，版本均为 `0.1.3`，npm 根据系统和 CPU 安装对应包。
 
 维护者用 `scripts/package-native.mjs` 生成平台包：Linux 资产来自 MLab Gateway `v0.4.2`，先校验冻结的 `SHA256SUMS` 摘要，再校验各资产和架构；macOS 包使用同版本 ARM64 可执行文件。发布源和清单摘要记录在 `scripts/native-release.json`；若指定其他构建，必须显式提供其清单 SHA-256。脚本不会访问用户连接配置。
 
@@ -170,3 +182,5 @@ mcodex ping --server wss://hk.0x06.cn/mlab-tunnel --compare wss://hk.0x06.cn/mla
 ```
 
 比较时建立两条独立隧道，分别显示连接建立耗时，再交替发送每端 5 次只读探针；结果只统计这组配对请求。相同地址也可比较，输出将标明两条独立连接的差异。请使用能接受当前连接 Token 的网关入口。检测保留配置、不发起模型生成。建连耗时与稳定请求耗时不同，最少广域跳数也不等于最快路径。
+
+启动器版本由 `package.json` 管理，独立运行包版本及其 Codex/原生程序版本由 `scripts/runtime-release.json` 管理。日常客户端修复、兼容性清单和组件升级发布 `runtime-v*`；只有启动器、信任根、安装机制或 Node 要求变化才发布 `launcher-v*`。文档与验收记录随 Git 更新，不单独触发 npm 发版。两条工作流默认手动运行仅生成可审查资产；发布需要显式选择 publish 或推送对应版本标签，并完成首次可信发布/签名密钥配置。

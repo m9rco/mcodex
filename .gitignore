@@ -2,6 +2,8 @@ node_modules/
 *.tgz
 packages/*/bin/
 coverage/
+runtime-dist/
+release/
 .codebase-memory/
 .codegraph/
 .DS_Store

@@ -20,6 +20,10 @@ Usage:
   mcodex doctor --local             Check local versions without connecting to a gateway
   mcodex engine status              Show the actual Codex version and selected executable
   mcodex engine check               Read the official npm version; does not install or switch
+  mcodex runtime status             Show launcher/runtime versions and cache location
+  mcodex update --check              Check the signed stable runtime channel
+  mcodex update                      Install and activate a verified runtime without npm
+  mcodex rollback [--bundled]         Select the previous runtime or the npm baseline
   mcodex logout                     Delete mcodex connection settings
   mcodex codex [arguments]           Pass a reserved command through to official Codex
 

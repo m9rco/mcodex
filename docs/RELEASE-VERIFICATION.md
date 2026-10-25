@@ -1,4 +1,8 @@
-# npm 发行验证
+# npm 启动器发行验证
+
+日常运行包通过 GitHub Release 独立更新，详见 [运行包发行](RUNTIME-UPDATES.md)。只有启动器、信任根、安装机制或 Node 要求变化才发 npm；文档修正与运行包代码变化不单独发布 npm。
+
+优先运行 `node scripts/release-preflight.mjs --directory <全新冻结目录>`，随后由 `publish-npm.yml` 使用标准 npm CLI 和 OIDC 发布同一冻结归档。`--local-only` 适用于常规 CI，只验证本地打包，不检查版本占用或下载依赖。首次可信发布配置见运行包文档。
 
 发布回执或网页两步验证完成，并不代表版本已能公开安装。npm 会异步校验新版本；HTTP 409 也不能当作成功。公开 metadata、`latest` 标签与实际 tarball 下载全部一致后，才宣布发行完成。
 
