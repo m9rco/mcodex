@@ -21,7 +21,9 @@ export async function loadRelease(directory) {
     if (!names.includes(manifest.name)) throw new Error(`Unexpected release package: ${filename}`);
     if (packages.has(manifest.name)) throw new Error(`Duplicate release package: ${manifest.name}`);
     if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error(`Invalid version: ${manifest.name}`);
-    packages.set(manifest.name, { name: manifest.name, version: manifest.version, integrity: digest(await readFile(archive)), manifest });
+    const readme = manifest.name === names[0] ? (await run('tar', ['-xOf', archive, 'package/README.md'], { maxBuffer: 1024 * 1024 })).stdout : undefined;
+    if (manifest.name === names[0] && !readme?.trim()) throw new Error('The frozen main package must contain a README');
+    packages.set(manifest.name, { name: manifest.name, version: manifest.version, integrity: digest(await readFile(archive)), manifest, readme });
   }
   if (packages.size !== names.length) throw new Error('The directory must contain the main package and all three native tarballs');
   const main = packages.get(names[0]);
@@ -56,6 +58,7 @@ export async function verifyPublished(packages, {
         if (!metadata) return `${label}: version not public`;
         if (metadata.name !== expected.name || metadata.version !== expected.version || metadata.dist?.integrity !== expected.integrity) throw new Error(`${label}: metadata integrity mismatch`);
         if (packument['dist-tags']?.latest !== expected.version) return `${label}: latest tag not updated`;
+        if (expected.readme !== undefined && (packument.readme || metadata.readme) !== expected.readme) return `${label}: public README not updated`;
         if (downloaded.has(label)) return null;
         let tarball;
         try { tarball = new URL(metadata.dist.tarball); } catch { throw new Error(`${label}: invalid tarball URL`); }

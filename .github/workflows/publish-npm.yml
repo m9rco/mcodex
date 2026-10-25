@@ -1,0 +1,74 @@
+name: Publish stable npm launcher
+
+on:
+  push:
+    tags: ['launcher-v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the reviewed launcher (false only prepares frozen artifacts)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-launcher-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: npm ci --omit=optional --ignore-scripts
+      - run: npm run check && npm test
+      - name: Freeze and validate the exact launcher and existing native packages
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          RELEASE_EVENT: ${{ github.event_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "$RELEASE_EVENT" = push ] && [ "$RELEASE_REF" != "launcher-v$VERSION" ]; then
+            echo 'Tag does not match the launcher version'; exit 1
+          fi
+          node scripts/release-preflight.mjs --directory "$RUNNER_TEMP/frozen" --expected-version "$VERSION"
+          node scripts/verify-published.mjs --directory "$RUNNER_TEMP/frozen" --platforms-only
+      - name: Exercise the standard npm publisher without uploading
+        run: npm publish "$RUNNER_TEMP"/frozen/m9rco-mcodex-[0-9]*.tgz --dry-run --ignore-scripts --access public
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: frozen-npm-launcher
+          path: ${{ runner.temp }}/frozen/
+          retention-days: 30
+
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: prepare
+    runs-on: ubuntu-24.04
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: npm install -g npm@12.2.0 --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: frozen-npm-launcher
+          path: ${{ runner.temp }}/frozen/
+      - name: Publish the frozen archive through npm OIDC
+        run: npm publish "$RUNNER_TEMP"/frozen/m9rco-mcodex-[0-9]*.tgz --access public --provenance --registry=https://registry.npmjs.org
+      - name: Wait for public metadata, README and all frozen downloads
+        run: node scripts/verify-published.mjs --directory "$RUNNER_TEMP/frozen" --timeout-seconds 600 --interval-seconds 10

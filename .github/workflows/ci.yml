@@ -20,3 +20,5 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm pack --dry-run
+      - name: Verify the real frozen launcher and README before release
+        run: node scripts/release-preflight.mjs --directory "$RUNNER_TEMP/npm-preflight" --local-only

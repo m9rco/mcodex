@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "repository": "m9rco/mcodex",
+  "channelURL": "https://github.com/m9rco/mcodex/releases/download/runtime-stable/channel.json",
+  "publicKeys": {
+    "runtime-2026-10": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAHn+CVbxaf6ViYwK7exHg06bvxthkS8+HWfPXOPh5tww=\n-----END PUBLIC KEY-----\n"
+  }
+}

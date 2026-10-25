@@ -1,6 +1,6 @@
 {
   "name": "@m9rco/mcodex",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Run the official Codex CLI through an authenticated persistent gateway, with one-time setup.",
   "type": "module",
   "bin": {
@@ -22,12 +22,15 @@
     "docs/PROPOSAL.md",
     "docs/VALIDATION.md",
     "docs/TELEMETRY-AND-COMPATIBILITY.md",
-    "docs/ENGINE-AND-CONTEXT.md"
+    "docs/ENGINE-AND-CONTEXT.md",
+    "docs/RUNTIME-UPDATES.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "for file in bin/mcodex.js src/*.js scripts/*.mjs; do node --check \"$file\" || exit; done",
-    "pack:native": "node scripts/package-native.mjs"
+    "pack:native": "node scripts/package-native.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs"
   },
   "dependencies": {
     "@openai/codex": "0.163.0"
