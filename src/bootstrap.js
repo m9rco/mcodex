@@ -20,7 +20,8 @@ export async function bootstrap(args, { runtimeOptions = {}, stdout = console.lo
     try {
       if (args[1] === '--check') {
         const result = await checkRuntimeUpdate({ ...runtimeOptions, signal: controller.signal });
-        stdout(`Runtime ${result.selected.version}; stable ${result.manifest.version}; ${result.available ? 'update available' : 'up to date'}.`);
+        const status = result.available ? (result.selected.version === result.manifest.version ? 'independent runtime installation available' : 'update available') : 'up to date';
+        stdout(`Runtime ${result.selected.version}; stable ${result.manifest.version}; ${status}.`);
       } else {
         stdout('Checking the signed runtime channel; the active version changes only after verification and a local health check.');
         const result = await updateRuntime({ ...runtimeOptions, signal: controller.signal });

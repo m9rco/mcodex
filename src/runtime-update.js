@@ -178,7 +178,8 @@ export async function checkRuntimeUpdate({ directory = runtimeDirectory(), polic
   const comparison = compareVersions(manifest.version, state.highestVersion);
   if (comparison < 0 || comparison === 0 && state.highestArtifact !== null && state.highestArtifact !== artifact.sha256) throw new Error('Runtime channel attempted a downgrade or replacement of an existing version.');
   const selected = await selectRuntime({ directory, policy, target });
-  return { envelope, manifest, artifact, selected, available: compareVersions(manifest.version, selected.version) > 0 };
+  const difference = compareVersions(manifest.version, selected.version);
+  return { envelope, manifest, artifact, selected, available: difference > 0 || difference === 0 && selected.source === 'bundled' };
 }
 
 export async function healthCheck(root, { signal, timeoutMs = 30000 } = {}) {
@@ -219,6 +220,20 @@ export async function updateRuntime(options = {}) {
     const releases = path.join(directory, 'releases');
     await mkdir(releases, { recursive: true, mode: 0o700 });
     await owned(releases, { directory: true });
+    const state = await readState(directory), baseId = `${manifest.version}-${artifact.sha256}`;
+    let cached;
+    for (const id of new Set([baseId, state.current, state.previous])) {
+      if (id !== null && (id === baseId || id.startsWith(`${baseId}-`))) {
+        try { cached = await installedRuntime(directory, id, policy, target); break; } catch { /* download a fresh immutable installation */ }
+      }
+    }
+    if (cached) {
+      await (options.healthCheckImpl ?? healthCheck)(cached.directory, { signal: options.signal });
+      options.signal?.throwIfAborted();
+      await atomicJSON(directory, 'state.json', { schema: 1, current: cached.id, previous: candidate.selected.id,
+        highestVersion: manifest.version, highestArtifact: artifact.sha256 });
+      return { changed: true, version: manifest.version, previous: state.current };
+    }
     const temporary = await mkdtemp(path.join(directory, '.download-'));
     try {
       const archive = path.join(temporary, 'runtime.tar.gz');
@@ -254,7 +269,6 @@ export async function updateRuntime(options = {}) {
         }
       }
       if (!reusable) await rename(temporary, destination);
-      const state = await readState(directory);
       await atomicJSON(directory, 'state.json', { schema: 1, current: id, previous: candidate.selected.id,
         highestVersion: manifest.version, highestArtifact: artifact.sha256 });
       return { changed: true, version: manifest.version, previous: state.current };

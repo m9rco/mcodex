@@ -92,6 +92,19 @@ test('explicit update verifies a self-contained runtime, switches atomically and
   assert(first.requests.every(r => r.options.credentials === 'omit' && !Object.keys(r.options.headers).some(k => k.toLowerCase() === 'authorization')));
 });
 
+test('the first migration installs an equal-version managed runtime and reuses it after rollback', async t => {
+  const f = await fixture(t), release = f.release('0.3.0');
+  assert.equal((await checkRuntimeUpdate(release.options)).available, true);
+  await updateRuntime(release.options);
+  assert.equal((await selectRuntime(release.options)).source, 'managed');
+  assert.equal((await checkRuntimeUpdate(release.options)).available, false);
+  await rollbackRuntime({ ...release.options, bundled: true });
+  const downloads = release.requests.filter(r => r.url.endsWith('.tar.gz')).length;
+  await updateRuntime(release.options);
+  assert.equal(release.requests.filter(r => r.url.endsWith('.tar.gz')).length, downloads);
+  assert.equal((await selectRuntime(release.options)).source, 'managed');
+});
+
 test('signature, expiry and launcher API are checked before any artifact execution', async t => {
   const f = await fixture(t), good = f.release();
   assert.equal(verifyEnvelope(good.envelope, { policy: f.policy }).version, '0.3.1');
