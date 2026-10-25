@@ -1,6 +1,6 @@
 # 独立运行包 0.3.0 验收
 
-2026-10-25，架构改造通过 PR #1 合入 main。稳定启动器预备版本为 npm 0.3.0；日常运行包改用 GitHub Release，原生 npm 包仍为 0.1.3，不重复发布。
+2026-10-25，架构改造通过 PR #1 合入 main。稳定启动器 npm 0.3.0 已公开；日常运行包改用 GitHub Release，原生 npm 包仍为 0.1.3，不重复发布。
 
 ## 公开发行
 
@@ -8,6 +8,7 @@
 - 发行流水线 40158270189：三平台构建、测试、真实依赖健康检查、真实 Codex 工作目录检查，以及公开归档/签名通道校验全部通过。
 - PR 三平台验收 40158054391、两版 Codex 真实检查 40158054372、基础 CI 40158054369 全部通过。
 - npm 工作流预演 40158272499：冻结主包、匿名原生依赖摘要校验、README/基线预检和标准 npm publisher dry-run 通过；没有执行 npm 上传。
+- 正式 npm 工作流 [40159725805](https://github.com/m9rco/mcodex/actions/runs/40159725805) 从提交 `303aa64a71b66ac4101b2066c974d47f38a0c562` 冻结并通过 OIDC 发布 0.3.0；公开 metadata、latest、README 和四个冻结归档全部校验通过。详见 [npm 发行记录](npm-0.3.0.md)。
 
 ## 本机验收
 
@@ -21,4 +22,6 @@
 
 ## 外部启用状态
 
-GitHub runtime-release/npm-release 环境已经建立，仅允许 main 与各自版本标签；运行包签名密钥以环境 secret 保存，私钥不进入仓库或归档。npm Trusted Publisher 仍需维护者本人完成 npm 身份验证后建立；截至本记录未发布 npm 0.3.0，公开 npm 版本仍为 0.2.3。
+GitHub runtime-release/npm-release 环境已经建立，仅允许 main 与各自版本标签；运行包签名密钥以环境 secret 保存，私钥不进入仓库或归档。npm Trusted Publisher 已完成维护者身份验证并回读核验，仅绑定 `m9rco/mcodex` 的 `publish-npm.yml` 与 `npm-release` 环境，允许直接发布；首次 OIDC 正式发行成功，未配置长期 npm token。
+
+用户需要通过 npm 升级一次到 0.3.0，随后使用 `mcodex update --check` / `mcodex update` 获取已签名的独立运行包，使用 `mcodex rollback` 回退。常规业务代码与引擎升级走运行包流水线；启动器协议、信任根或基线依赖需要变化时才更新 npm。
