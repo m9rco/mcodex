@@ -8,6 +8,8 @@
 
 正常启动不进行在线更新检查。连接设置仍由 `MCODEX_CONFIG_DIR` / XDG_CONFIG_HOME 管理，运行包位于 `${XDG_DATA_HOME:-~/.local/share}/mcodex/runtime`，可通过 `MCODEX_RUNTIME_DIR` 指定。不会改写 HOME、CODEX_HOME、全局 Codex 或已有连接配置。
 
+公开下载遵循 HTTP_PROXY / HTTPS_PROXY / NO_PROXY（也支持小写变量）。配置 HTTP 代理时，下载工作进程使用 Node 的环境代理支持，要求 Node 支持 `--use-env-proxy`（本次在 Node 22.23.1 验证）；它不会改变主进程的网络设置或本机网关探测。只有 SOCKS ALL_PROXY 的环境需要另外提供 HTTP(S) 代理入口。
+
 ## 发行和信任
 
 - `scripts/runtime-release.json` 独立管理运行包、官方 Codex、原生程序版本；Codex 必须已列入运行包的完整兼容性验收清单。

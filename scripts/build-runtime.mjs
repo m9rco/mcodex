@@ -32,7 +32,7 @@ export async function buildRuntime({ output, dependenciesDir, nativeDirectory, c
   try {
     const runtime = path.join(temporary, 'runtime');
     await mkdir(path.join(runtime, 'src'), { recursive: true });
-    const excluded = new Set(['bootstrap.js', 'runtime-update.js', 'runtime-archive.js', 'runtime-policy.json']);
+    const excluded = new Set(['bootstrap.js', 'runtime-update.js', 'runtime-archive.js', 'runtime-network.js', 'runtime-policy.json']);
     for (const name of await readdir(path.join(projectRoot, 'src'))) {
       if (!excluded.has(name)) await copyTree(path.join(projectRoot, 'src', name), path.join(runtime, 'src', name));
     }

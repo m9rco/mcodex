@@ -22,7 +22,7 @@ export function inspectMainArchive(archive, expected) {
       JSON.stringify(pkg.optionalDependencies) !== JSON.stringify(expected.optionalDependencies)) throw new Error('Frozen npm manifest does not match the release.');
   const readme = tarText(archive, 'README.md');
   if (!readme.trim() || !readme.includes('npm install -g @m9rco/mcodex')) throw new Error('npm README is absent or missing installation instructions.');
-  for (const name of ['bin/mcodex.js', 'src/bootstrap.js', 'src/runtime-update.js', 'src/runtime-archive.js', 'src/runtime-policy.json', 'src/cli.js', 'src/engine-compatibility.json']) {
+  for (const name of ['bin/mcodex.js', 'src/bootstrap.js', 'src/runtime-update.js', 'src/runtime-archive.js', 'src/runtime-network.js', 'src/runtime-policy.json', 'src/cli.js', 'src/engine-compatibility.json']) {
     if (!names.includes(`package/${name}`)) throw new Error('The npm baseline or launcher is incomplete.');
   }
   const compatibility = JSON.parse(tarText(archive, 'src/engine-compatibility.json'));

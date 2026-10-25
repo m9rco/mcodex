@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractRuntime, fileDigest, safePath, verifyTree } from './runtime-archive.js';
+import { hasHTTPProxy, proxyWorkerFetch } from './runtime-network.js';
 
 export const launcherApi = 1;
 export const defaultPolicy = JSON.parse(await readFile(new URL('./runtime-policy.json', import.meta.url), 'utf8'));
@@ -140,7 +141,8 @@ export async function publicResponse(url, { fetchImpl = fetch, signal, timeoutMs
   const requestSignal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]);
   for (let hop = 0; hop <= 5; hop++) {
     if (current.protocol !== 'https:' || !hosts.has(current.hostname) || current.username || current.password || current.port) throw new Error('Unsupported public download origin.');
-    const response = await fetchImpl(current.href, { redirect: 'manual', credentials: 'omit', signal: requestSignal, headers: { Accept: accept } });
+    const download = fetchImpl === fetch && hasHTTPProxy() ? proxyWorkerFetch : fetchImpl;
+    const response = await download(current.href, { redirect: 'manual', credentials: 'omit', signal: requestSignal, headers: { Accept: accept } });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get('location');
       await response.body?.cancel();
