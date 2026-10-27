@@ -1,0 +1,208 @@
+name: Verify public runtime upgrade
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/verify-public-runtime.yml'
+  workflow_dispatch:
+    inputs:
+      expected_runtime:
+        description: Exact runtime version (blank uses scripts/runtime-release.json; must match it)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Public upgrade (${{ matrix.target }})
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-14
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install the public launcher and perform its first real upgrade
+        shell: bash
+        env:
+          EXPECTED_RUNTIME: ${{ inputs.expected_runtime || '' }}
+          EXPECTED_TARGET: ${{ matrix.target }}
+          NODE_OPTIONS: ''
+          NODE_PATH: ''
+          BASH_ENV: /dev/null
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import os from 'node:os';
+          import path from 'node:path';
+
+          process.umask(0o077);
+          const root = path.join(process.env.RUNNER_TEMP, 'mcodex-public-runtime');
+          const logs = path.join(root, 'logs');
+          mkdirSync(logs, { recursive: true, mode: 0o700 });
+          const machine = { node: process.version, platform: process.platform, arch: process.arch,
+            os: os.type(), release: os.release(), versions: process.versions };
+          const result = { schema: 1, status: 'running', startedAt: new Date().toISOString(), machine, commands: [] };
+          const json = filename => JSON.parse(readFileSync(filename, 'utf8'));
+          const save = () => writeFileSync(path.join(logs, 'result.json'), JSON.stringify(result, null, 2) + '\n');
+          const clean = value => String(value ?? '').replace(/(https?:\/\/)[^/\s@]+@/gi, '$1[redacted]@');
+          writeFileSync(path.join(logs, 'machine.json'), JSON.stringify(machine, null, 2) + '\n');
+          save();
+
+          try {
+            const launcher = json('package.json');
+            const release = json('scripts/runtime-release.json');
+            const expected = process.env.EXPECTED_RUNTIME || release.version;
+            const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+            for (const value of [expected, release.version, release.codexVersion, release.nativeVersion, release.nativePackageVersion]) {
+              assert.match(value, semver, 'Release versions must be exact stable semantic versions');
+            }
+            assert.equal(launcher.name, '@m9rco/mcodex');
+            assert.equal(launcher.version, '0.3.0', 'This acceptance test starts with the public 0.3.0 launcher');
+            assert.equal(expected, release.version, 'Manual expectation must match runtime-release.json');
+            const target = process.platform + '-' + process.arch;
+            assert.equal(target, process.env.EXPECTED_TARGET, 'Runner architecture must match its matrix target');
+            assert.ok(release.nativeSources?.[target], 'Release manifest must include this native target');
+            result.expected = { launcher: launcher.version, runtime: expected, target,
+              codex: release.codexVersion, native: release.nativeVersion, nativePackage: release.nativePackageVersion };
+
+            const sandbox = path.join(root, 'sandbox');
+            assert.equal(existsSync(sandbox), false, 'Acceptance requires a fresh installation and runtime cache');
+            const dirs = Object.fromEntries(['home', 'codex', 'config', 'data', 'cache', 'state', 'xdg-runtime',
+              'config-dirs', 'data-dirs', 'mcodex-config', 'runtime', 'npm-prefix', 'npm-cache', 'tmp', 'work']
+              .map(name => [name, path.join(sandbox, name)]));
+            for (const directory of Object.values(dirs)) mkdirSync(directory, { recursive: true, mode: 0o700 });
+            const userConfig = path.join(sandbox, 'user.npmrc');
+            const globalConfig = path.join(sandbox, 'global.npmrc');
+            writeFileSync(userConfig, '');
+            writeFileSync(globalConfig, '');
+
+            // Only inherit PATH, locale and network settings. In particular, no
+            // Token, npm auth, MCODEX override, NODE_OPTIONS or NODE_PATH survives.
+            const inherited = ['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM', 'CI',
+              'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+              'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS'];
+            const env = Object.fromEntries(inherited.filter(name => process.env[name] !== undefined)
+              .map(name => [name, process.env[name]]));
+            Object.assign(env, {
+              HOME: dirs.home, CODEX_HOME: dirs.codex,
+              XDG_CONFIG_HOME: dirs.config, XDG_DATA_HOME: dirs.data, XDG_CACHE_HOME: dirs.cache,
+              XDG_STATE_HOME: dirs.state, XDG_RUNTIME_DIR: dirs['xdg-runtime'],
+              XDG_CONFIG_DIRS: dirs['config-dirs'], XDG_DATA_DIRS: dirs['data-dirs'],
+              MCODEX_CONFIG_DIR: dirs['mcodex-config'], MCODEX_RUNTIME_DIR: dirs.runtime,
+              TMPDIR: dirs.tmp, TMP: dirs.tmp, TEMP: dirs.tmp,
+              npm_config_userconfig: userConfig, npm_config_globalconfig: globalConfig,
+              npm_config_cache: dirs['npm-cache'], npm_config_prefix: dirs['npm-prefix'],
+              npm_config_registry: 'https://registry.npmjs.org/', npm_config_update_notifier: 'false',
+            });
+            const run = (name, argv, timeout) => {
+              const started = Date.now();
+              const command = spawnSync(process.execPath, argv, {
+                cwd: dirs.work, env, encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024,
+              });
+              const stdout = clean(command.stdout), stderr = clean(command.stderr);
+              writeFileSync(path.join(logs, name + '.stdout.log'), stdout);
+              writeFileSync(path.join(logs, name + '.stderr.log'), stderr);
+              result.commands.push({ name, exitCode: command.status, signal: command.signal,
+                errorCode: command.error?.code ?? null, durationMs: Date.now() - started,
+                stdout: name + '.stdout.log', stderr: name + '.stderr.log' });
+              save();
+              console.log('--- ' + name + ' ---');
+              process.stdout.write(stdout);
+              process.stderr.write(stderr);
+              assert.equal(command.error, undefined, name + ' could not finish within its command budget');
+              assert.equal(command.status, 0, name + ' failed; the original command is not retried');
+              return stdout;
+            };
+            const hasLine = (output, line) => assert.ok(output.split(/\r?\n/).includes(line), 'Missing expected output: ' + line);
+            const npm = realpathSync(path.join(path.dirname(process.execPath), 'npm'));
+            result.npm = run('npm-version', [npm, '--version'], 30_000).trim();
+            run('npm-install', [npm, 'install', '--global', '--prefix', dirs['npm-prefix'],
+              '--cache', dirs['npm-cache'], '--userconfig', userConfig, '--globalconfig', globalConfig,
+              '--registry=https://registry.npmjs.org/', '--include=optional', '--ignore-scripts', '--no-audit', '--no-fund',
+              launcher.name + '@' + launcher.version], 600_000);
+            const installed = path.join(dirs['npm-prefix'], 'lib', 'node_modules', '@m9rco', 'mcodex');
+            assert.equal(json(path.join(installed, 'package.json')).version, launcher.version);
+            assert.equal(json(path.join(installed, 'src/runtime-policy.json')).channelURL,
+              'https://github.com/m9rco/mcodex/releases/download/runtime-stable/channel.json');
+            const cli = path.join(installed, 'bin/mcodex.js');
+
+            // Invoke the untouched npm CLI. Do not prewarm or retry its health
+            // check, inject verifiers, install a local build, or write state.json.
+            hasLine(run('update-check', [cli, 'update', '--check'], 120_000),
+              'Runtime ' + launcher.version + '; stable ' + expected + '; update available.');
+            hasLine(run('update', [cli, 'update'], 420_000),
+              'Runtime ' + expected + '; installed and activated.');
+            const identity = 'Launcher ' + launcher.version + '; runtime ' + expected + '; source: managed.';
+            hasLine(run('runtime-status', [cli, 'runtime', 'status'], 60_000), identity);
+            const doctor = run('doctor-local', [cli, 'doctor', '--local'], 60_000);
+            hasLine(doctor, identity);
+            hasLine(doctor, 'mcodex ' + expected + '; bundled default Codex ' + release.codexVersion + '.');
+            hasLine(doctor, 'Codex ' + release.codexVersion + '; source: bundled; compatibility: tested.');
+            hasLine(doctor, 'Native transport: mlab-gateway ' + release.nativeVersion + '; source: bundled; package: '
+              + release.nativePackageVersion + '; bundled match: verified.');
+
+            // Read the CLI-created selection only after successful activation.
+            const selection = json(path.join(dirs.runtime, 'state.json'));
+            assert.match(selection.current, /^\d+\.\d+\.\d+-[a-f0-9]{64}$/);
+            assert.equal(selection.highestVersion, expected);
+            assert.equal(selection.current, expected + '-' + selection.highestArtifact);
+            assert.equal(selection.previous, null, 'Fresh install must not inherit a previous runtime');
+            const managed = path.join(dirs.runtime, 'releases', selection.current, 'runtime');
+            const runtimePackage = json(path.join(managed, 'package.json'));
+            const nativeName = '@m9rco/mcodex-' + target;
+            const nativeRoot = path.join(managed, 'node_modules', nativeName);
+            const nativePackage = json(path.join(nativeRoot, 'package.json'));
+            const codexPackage = json(path.join(managed, 'node_modules/@openai/codex/package.json'));
+            assert.equal(runtimePackage.name, '@m9rco/mcodex-runtime');
+            assert.equal(runtimePackage.version, expected);
+            assert.equal(runtimePackage.dependencies['@openai/codex'], release.codexVersion);
+            assert.equal(runtimePackage.optionalDependencies[nativeName], release.nativePackageVersion);
+            assert.equal(codexPackage.version, release.codexVersion);
+            assert.equal(nativePackage.name, nativeName);
+            assert.equal(nativePackage.version, release.nativePackageVersion);
+            assert.equal(nativePackage.mcodex.transportVersion, release.nativeVersion);
+            const nativeBinary = path.join(nativeRoot, 'bin/mlab-gateway');
+            assert.equal(createHash('sha256').update(readFileSync(nativeBinary)).digest('hex'), nativePackage.mcodex.binarySha256);
+            hasLine(doctor, 'Native path: ' + realpathSync(nativeBinary));
+            hasLine(doctor, 'Codex path: ' + realpathSync(path.join(managed, 'node_modules/@openai/codex/bin/codex.js')));
+            assert.equal(existsSync(path.join(dirs['mcodex-config'], 'server.key')), false);
+            result.observed = { runtime: runtimePackage.version, codex: codexPackage.version,
+              native: nativePackage.mcodex.transportVersion, nativePackage: nativePackage.version, selection: selection.current };
+            result.status = 'passed';
+            console.log('Public first-upgrade acceptance passed for ' + target + '.');
+          } catch (error) {
+            result.status = 'failed';
+            result.failure = clean(error.message);
+            console.error('Public first-upgrade acceptance failed: ' + result.failure);
+            process.exitCode = 1;
+          } finally {
+            result.finishedAt = new Date().toISOString();
+            save();
+          }
+          NODE
+      - name: Save public upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-runtime-${{ matrix.target }}
+          path: ${{ runner.temp }}/mcodex-public-runtime/logs/
+          retention-days: 14
+          if-no-files-found: warn
