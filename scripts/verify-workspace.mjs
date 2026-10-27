@@ -154,5 +154,7 @@ try {
   Object.assign(process.env, originalEnv);
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
-  await rm(directory, { recursive: true, force: true });
+  // The official engine may still be finishing an auxiliary plugin clone after
+  // its CLI exits. Only retry cleanup of this isolated fixture's scratch tree.
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
