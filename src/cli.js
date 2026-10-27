@@ -223,9 +223,11 @@ export async function main(args) {
   }
   if (args[0] === 'doctor' && args[1] === '--local' && args.length === 2) {
     return localCommand(async signal => {
+      // Cold binaries need extra startup time; two probes leave room under the launcher's 30-second health budget.
+      const versionInspection = { signal, timeoutMs: 10000 };
       formatWorkspace().forEach(line => console.log(line));
-      formatEngine(await resolveEngine({ signal })).forEach(line => console.log(line));
-      formatNative(await inspectNative({ signal }), { path: true }).forEach(line => console.log(line));
+      formatEngine(await resolveEngine(versionInspection)).forEach(line => console.log(line));
+      formatNative(await inspectNative(versionInspection), { path: true }).forEach(line => console.log(line));
       console.log(`Node ${process.version}; local checks only; no gateway connection.`);
       return 0;
     });
