@@ -48,6 +48,10 @@ jobs:
           MCODEX_WORKSPACE_TEST_CODEX_BIN: ${{ runner.temp }}/codex-engine/node_modules/@openai/codex/bin/codex.js
           MCODEX_WORKSPACE_REQUIRE_ZSH: '1'
         run: node scripts/verify-workspace.mjs
+      - name: Verify parallel local agents through supported subscription input items
+        env:
+          MCODEX_AGENT_TEST_CODEX_BIN: ${{ runner.temp }}/codex-engine/node_modules/@openai/codex/bin/codex.js
+        run: node scripts/verify-agents.mjs
 
   inspect-candidate:
     if: github.event_name == 'workflow_dispatch'

@@ -82,6 +82,8 @@ mcodex exec "解释这个仓库的入口"
 
 运行包 0.3.1 还修复了非登录启动文件切目录的问题：Bash/Zsh 仍执行原有初始化，随后恢复本次工具的入口目录，再执行工具命令。0.3.0 启动器用户运行 `mcodex update` 获取修复，并重新启动 mcodex 会话；无需再次更新 npm。
 
+运行包 0.3.2 保留本地并行 agent，并修复其 v2 协作消息触发 `subscription_sharing_unsupported_capability` / `param=input` 的问题。运行 `mcodex update` 后新建会话；已有 v2 历史不会自动迁移，反复 continue 或 resume 仍可能携带不支持的消息。详见[并行 agent 兼容说明](docs/ENGINE-AND-CONTEXT.md#本地并行-agent-与订阅请求格式)。
+
 ## 工作方式
 
 ```mermaid
