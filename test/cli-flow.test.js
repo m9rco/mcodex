@@ -153,6 +153,7 @@ writeFileSync(${JSON.stringify(record)}, JSON.stringify({
   cwd: process.cwd(),
   home: process.env.HOME,
   codeHome: process.env.CODEX_HOME,
+  shellDirectory: process.env.ZDOTDIR,
   args: process.argv.slice(2),
   addedEnvironmentKeys: Object.keys(process.env).filter(key => !baseKeys.has(key)).sort(),
   connectionTokenInEnvironment: Object.values(process.env).some(value => value.includes(token)),
@@ -275,8 +276,8 @@ async function assertHandoff(context, result, code = 17) {
   assert.equal(result.code, code, 'the wrapper must preserve the official CLI exit status');
   assert.equal(result.stdout, codexOutput, 'wrapper status must not add anything to Codex stdout');
   const child = JSON.parse(await readFile(context.record, 'utf8'));
-  const allowed = ['MCODEX_LOCAL_KEY', 'NO_PROXY', 'no_proxy'];
-  assert.equal(child.addedEnvironmentKeys.every(key => allowed.includes(key)), true, 'only local authentication and loopback proxy exclusions may be introduced');
+  const allowed = ['MCODEX_LOCAL_KEY', 'NO_PROXY', 'no_proxy', 'BASH_ENV', 'ZDOTDIR'];
+  assert.equal(child.addedEnvironmentKeys.every(key => allowed.includes(key)), true, 'only local authentication, loopback exclusions and private shell startup paths may be introduced');
   assert.deepEqual(child.addedEnvironmentKeys, allowed.filter(key => !Object.hasOwn(context.env, key)).sort());
   assert.equal(child.proxyBypass.uppercase, child.proxyBypass.lowercase);
   for (const host of ['127.0.0.1', 'localhost', '::1']) assert.ok(child.proxyBypass.uppercase.split(',').includes(host));
@@ -284,6 +285,7 @@ async function assertHandoff(context, result, code = 17) {
   assert.equal(child.connectionTokenInEnvironment, false);
   assert.equal(child.localKeyIsConnectionToken, false);
   assert.equal(child.hasLocalKey, true);
+  await assert.rejects(access(child.shellDirectory), { code: 'ENOENT' });
   assert.equal(JSON.stringify(child.args).includes(token), false);
   assert.equal(child.args.some(arg => /mcodex:|Connecting to the gateway|Gateway connected|Starting Codex/i.test(arg)), false, 'startup status must not become a Codex argument');
   const list = await assertClean(context);

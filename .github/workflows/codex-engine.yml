@@ -28,6 +28,12 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --omit=optional --ignore-scripts
+      - name: Ensure Zsh startup regression coverage
+        run: |
+          if [ ! -x /bin/zsh ]; then
+            sudo apt-get update
+            sudo apt-get install --yes zsh
+          fi
       - name: Install an isolated official engine
         env:
           CODEX_VERSION: ${{ matrix.codex }}
@@ -40,6 +46,7 @@ jobs:
       - name: Verify real engine workspace and login-shell behavior with loopback inference
         env:
           MCODEX_WORKSPACE_TEST_CODEX_BIN: ${{ runner.temp }}/codex-engine/node_modules/@openai/codex/bin/codex.js
+          MCODEX_WORKSPACE_REQUIRE_ZSH: '1'
         run: node scripts/verify-workspace.mjs
 
   inspect-candidate:

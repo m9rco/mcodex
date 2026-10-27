@@ -21,7 +21,8 @@ try {
   if (process.argv[3] === '--workspace') {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     execFileSync(process.execPath, [path.join(root, 'scripts/verify-workspace.mjs')], { cwd: root, stdio: 'inherit',
-      env: { ...process.env, MCODEX_WORKSPACE_TEST_CODEX_BIN: path.join(runtime, 'node_modules/@openai/codex/bin/codex.js') } });
+      env: { ...process.env, MCODEX_WORKSPACE_TEST_RUNTIME_ROOT: runtime,
+        MCODEX_WORKSPACE_TEST_CODEX_BIN: path.join(runtime, 'node_modules/@openai/codex/bin/codex.js') } });
   }
   console.log(`Runtime ${artifact.version} ${target}: archive, local dependencies and health verified.`);
 } finally { await rm(temporary, { recursive: true, force: true }); }

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { bundledCodexEntry, commandVersion, engineCommand, resolveEngine } from './engine.js';
 import { formatConnectionFailure, readConnectionFailure } from './latency.js';
+import { withShellEnvironment } from './shell-environment.js';
 
 const require = createRequire(import.meta.url);
 const wrapperManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -189,29 +190,32 @@ export async function runCodex(tunnel, args, { model, engine, codexEntry, signal
   engine ??= codexEntry ? engineCommand(codexEntry) : await resolveEngine({ signal });
   signal?.throwIfAborted();
   if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error('The native transport stopped before Codex could start.');
-  const child = spawn(engine.command, [...engine.prefix, ...codexArguments(providerArguments({ origin: tunnel.origin, model, engine }), args)], {
-    cwd,
-    stdio: 'inherit',
-    env: codexEnvironment(tunnel.key),
-  });
-  let transportFailed = false;
-  let stopping;
-  const stop = exitSignal => { stopping ??= stopProcess(child, exitSignal); };
-  const onTransportExit = () => { transportFailed = true; stop('SIGTERM'); };
-  tunnel.child.once('exit', onTransportExit);
-  const forward = () => { stop(signal.reason?.signal ?? 'SIGTERM'); };
-  signal?.addEventListener('abort', forward, { once: true });
-  try {
-    const code = await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', (code, exitSignal) => resolve(code ?? (exitSignal === 'SIGINT' ? 130 : 143)));
-      if (signal?.aborted) forward();
+  return withShellEnvironment(codexEnvironment(tunnel.key), async env => {
+    signal?.throwIfAborted();
+    const child = spawn(engine.command, [...engine.prefix, ...codexArguments(providerArguments({ origin: tunnel.origin, model, engine }), args)], {
+      cwd,
+      stdio: 'inherit',
+      env,
     });
-    if (transportFailed) throw new Error('The native transport stopped while Codex was running.');
-    return code;
-  } finally {
-    signal?.removeEventListener('abort', forward);
-    tunnel.child.removeListener('exit', onTransportExit);
-    await (stopping ?? stopProcess(child));
-  }
+    let transportFailed = false;
+    let stopping;
+    const stop = exitSignal => { stopping ??= stopProcess(child, exitSignal); };
+    const onTransportExit = () => { transportFailed = true; stop('SIGTERM'); };
+    tunnel.child.once('exit', onTransportExit);
+    const forward = () => { stop(signal.reason?.signal ?? 'SIGTERM'); };
+    signal?.addEventListener('abort', forward, { once: true });
+    try {
+      const code = await new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code, exitSignal) => resolve(code ?? (exitSignal === 'SIGINT' ? 130 : 143)));
+        if (signal?.aborted) forward();
+      });
+      if (transportFailed) throw new Error('The native transport stopped while Codex was running.');
+      return code;
+    } finally {
+      signal?.removeEventListener('abort', forward);
+      tunnel.child.removeListener('exit', onTransportExit);
+      await (stopping ?? stopProcess(child));
+    }
+  });
 }

@@ -9,10 +9,12 @@ import { createServer } from 'node:http';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { bundledCodexEntry, commandVersion, engineCommand } from '../src/engine.js';
-import { runCodex } from '../src/tunnel.js';
 
-const selectedEngine = path.resolve(process.env.MCODEX_WORKSPACE_TEST_CODEX_BIN || bundledCodexEntry());
+const runtimeRoot = process.env.MCODEX_WORKSPACE_TEST_RUNTIME_ROOT && path.resolve(process.env.MCODEX_WORKSPACE_TEST_RUNTIME_ROOT);
+const { runCodex } = await import(runtimeRoot ? pathToFileURL(path.join(runtimeRoot, 'src/tunnel.js')).href : new URL('../src/tunnel.js', import.meta.url).href);
+const selectedEngine = path.resolve(process.env.MCODEX_WORKSPACE_TEST_CODEX_BIN || (runtimeRoot ? path.join(runtimeRoot, 'node_modules/@openai/codex/bin/codex.js') : bundledCodexEntry()));
 const originalCwd = process.cwd();
 const originalEnv = { ...process.env };
 const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'mcodex-workspace-')));
@@ -39,11 +41,11 @@ const server = createServer(async (request, response) => {
     const name = names.includes('exec_command') ? 'exec_command' : 'shell_command';
     assert.ok(names.includes(name), 'official engine must expose a shell tool');
     const id = `response_${active.requests}`;
-    const command = 'pwd -P; cat ./workspace-marker.txt';
+    const command = 'pwd -P; cat ./workspace-marker.txt; printf "STARTUP:%s\\n" "${MCODEX_TEST_STARTUP-unset}"';
     const item = outputs.length
       ? { id: `message_${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Workspace check complete.', annotations: [] }] }
       : { id: `function_${id}`, type: 'function_call', call_id: `call_${id}`, name, status: 'completed',
-        arguments: JSON.stringify(name === 'exec_command' ? { cmd: command, shell: '/bin/bash', max_output_tokens: 1000 } : { command }) };
+        arguments: JSON.stringify(name === 'exec_command' ? { cmd: command, shell: active.shell ?? '/bin/bash', ...(active.workdir ? { workdir: active.workdir } : {}), max_output_tokens: 1000 } : { command }) };
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const emit = (type, value) => response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`);
     emit('response.created', { response: { id, status: 'in_progress', output: [] } });
@@ -98,9 +100,31 @@ try {
       commandOptions: ['-cfeatures.shell_snapshot=false', '-c=allow_login_shell=false'], expected: workspace },
     { label: 'last exec login-shell override remains effective with the mcodex provider', options: ['--config=allow_login_shell=false'],
       commandOptions: ['-c=features.shell_snapshot=false', '--config=allow_login_shell=true'], expected: home, drift: true },
+    { label: 'non-login Bash startup preserves cwd and initialization', options: ['-c', 'features.shell_snapshot=false'],
+      bashStartup: true, expected: workspace, startup: 'bash-env' },
+    { label: 'non-login Bash startup preserves explicit --cd', options: ['-c', 'features.shell_snapshot=false', '--cd', 'alternate workspace'],
+      bashStartup: true, expected: alternate, startup: 'bash-env' },
+    { label: 'non-login Bash startup preserves model-selected workdir', options: ['-c', 'features.shell_snapshot=false'],
+      bashStartup: true, workdir: 'alternate workspace', expected: alternate, startup: 'bash-env' },
+    { label: 'non-login Zsh startup preserves cwd and initialization', options: ['-c', 'features.shell_snapshot=false'],
+      shell: '/bin/zsh', zshStartup: true, expected: workspace, startup: 'zsh-env' },
+    { label: 'non-login Zsh startup preserves model-selected workdir', options: ['-c', 'features.shell_snapshot=false'],
+      shell: '/bin/zsh', zshStartup: true, workdir: 'alternate workspace', expected: alternate, startup: 'zsh-env' },
   ];
   for (const [index, scenario] of cases.entries()) {
-    active = { requests: 0, outputs: [] };
+    if (process.env.MCODEX_WORKSPACE_TEST_FILTER && !scenario.label.includes(process.env.MCODEX_WORKSPACE_TEST_FILTER)) continue;
+    if (scenario.shell === '/bin/zsh' && spawnSync('/bin/zsh', ['--version']).error?.code === 'ENOENT') {
+      if (process.env.MCODEX_WORKSPACE_REQUIRE_ZSH === '1') throw new Error('Zsh workspace acceptance requires /bin/zsh');
+      console.log(`SKIP: ${scenario.label}; /bin/zsh is not installed`);
+      continue;
+    }
+    await writeFile(startup, scenario.bashStartup
+      ? `export MCODEX_TEST_STARTUP=bash-env\ncd ${quote(home)}\n`
+      : `if shopt -q login_shell; then cd ${quote(home)}; fi\n`);
+    const zshStartup = path.join(home, '.zshenv');
+    if (scenario.zshStartup) await writeFile(zshStartup, `export MCODEX_TEST_STARTUP=zsh-env\ncd ${quote(home)}\n`);
+    else await rm(zshStartup, { force: true });
+    active = { requests: 0, outputs: [], shell: scenario.shell, workdir: scenario.workdir };
     const codexHome = path.join(directory, `codex-home-${index}`);
     await mkdir(codexHome);
     process.env.CODEX_HOME = codexHome;
@@ -120,6 +144,7 @@ try {
       const output = active.outputs.join('\n');
       assert.ok(output.split('\n').includes(scenario.expected), `${scenario.label}: expected cwd ${scenario.expected}; received:\n${output}`);
       assert.equal(output.includes(marker), !scenario.drift, `${scenario.label}: relative marker read did not match expected directory`);
+      if (scenario.startup) assert.ok(output.includes(`STARTUP:${scenario.startup}`), 'user shell initialization must still run');
       console.log(`PASS: ${scenario.label}`);
     } finally { clearTimeout(timeout); }
   }
@@ -129,5 +154,7 @@ try {
   Object.assign(process.env, originalEnv);
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
-  await rm(directory, { recursive: true, force: true });
+  // The official engine may still be finishing an auxiliary plugin clone after
+  // its CLI exits. Only retry cleanup of this isolated fixture's scratch tree.
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

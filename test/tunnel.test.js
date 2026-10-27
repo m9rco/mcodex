@@ -51,6 +51,8 @@ test('Codex gets a temporary local key and exit status; provider overrides do no
   assert.ok(data.args.includes('model_provider="mcodex"'));
   assert.equal(JSON.stringify(data.args).includes(tunnel.key), false);
   assert.equal(JSON.stringify(data).includes((await readFile(state.tokenFile, 'utf8')).trim()), false);
+  await assert.rejects(stat(data.bashEnv), { code: 'ENOENT' });
+  await assert.rejects(stat(data.zDotDir), { code: 'ENOENT' });
 });
 
 test('invalid server credentials and early native failure are surfaced without leaked logs', async t => {
@@ -102,6 +104,8 @@ test('cancellation escalates when Codex ignores termination, then allows tunnel 
   controller.abort(Object.assign(new Error('cancel'), { signal: 'SIGTERM' }));
   assert.equal(await running, 143);
   assert.ok(Date.now() - start < 4000);
+  const guarded = JSON.parse(await readFile(record, 'utf8'));
+  await assert.rejects(stat(guarded.zDotDir), { code: 'ENOENT' });
   await tunnel.close();
   await assert.rejects(stat(tunnel.directory), { code: 'ENOENT' });
 });
