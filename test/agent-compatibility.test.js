@@ -39,6 +39,13 @@ test('exact tested engines select compatible model metadata and override saved V
   }
 });
 
+test('the release engine has an explicitly verified compatibility catalog', async () => {
+  const release = JSON.parse(await readFile(new URL('../scripts/runtime-release.json', import.meta.url), 'utf8'));
+  const engine = JSON.parse(await readFile(new URL('../src/engine-compatibility.json', import.meta.url), 'utf8'));
+  assert.ok(metadata.engineVersions.includes(release.codexVersion), 'new bundled engines require agent acceptance and matching metadata');
+  for (const version of metadata.engineVersions) assert.ok(engine.tested_versions.includes(version));
+});
+
 test('unknown external engines do not receive metadata from a different engine version', () => {
   for (const engine of [undefined, { version: '9.0.0', source: 'external' }]) {
     const config = values(providerArguments({ ...options, engine }));
