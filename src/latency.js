@@ -1,5 +1,6 @@
 import { probeRelay, formatRelayPath } from './relay-path.js';
 import { performance } from 'node:perf_hooks';
+import { catalogScopePattern } from './state.js';
 
 const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const connectionFailures = {
@@ -123,6 +124,7 @@ export async function readDiagnostics(tunnel, { signal, request = fetch, timeout
       typeof rtt[name] === 'number' && Number.isFinite(rtt[name]) && rtt[name] >= 0 ? rtt[name] : null]),
   ) : null;
   return { available: true, schema_version: 1, connected: value.connected,
+    catalog_scope: value.connected && catalogScopePattern.test(value.catalog_scope ?? '') ? value.catalog_scope : null,
     tunnel: { metric: 'websocket_ping_round_trip', rtt: measured }, hops: [],
     transport: transportLimits(value.transport, value.connected),
     last_connection_error: value.connected ? null : parseConnectionFailure(value.last_connection_error),
