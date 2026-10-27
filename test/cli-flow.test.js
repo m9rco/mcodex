@@ -53,7 +53,8 @@ function isRunning(pid) {
 }
 
 async function fixture(t, { configured = false, transport = 'normal', codexHolds = false, engineHolds = false, diagnostics = 'legacy', proxyEnv = {},
-  nativePackageVersion, nativeBinaryVersion = transportVersion, nativeMetadataVersion = transportVersion } = {}) {
+  nativePackageVersion, nativeBinaryVersion = transportVersion, nativeMetadataVersion = transportVersion,
+  engineVersionDelayMs = 0, nativeVersionDelayMs = 0 } = {}) {
   const directory = await mkdtemp('/tmp/mcodex-cli-flow-');
   const context = { directory, events: path.join(directory, 'events.jsonl') };
   t.after(async () => {
@@ -85,6 +86,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 if (process.argv.length === 3 && process.argv[2] === '--version') {
+  if (${JSON.stringify(nativeVersionDelayMs)} > 0) await new Promise(resolve => setTimeout(resolve, ${JSON.stringify(nativeVersionDelayMs)}));
   console.log('mlab-gateway ${nativeBinaryVersion}');
   process.exit(0);
 }
@@ -140,6 +142,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 if (process.argv.length === 3 && process.argv[2] === '--version') {
+  if (${JSON.stringify(engineVersionDelayMs)} > 0) await new Promise(resolve => setTimeout(resolve, ${JSON.stringify(engineVersionDelayMs)}));
   if (${JSON.stringify(engineHolds)}) {
     appendFileSync(${JSON.stringify(context.events)}, JSON.stringify({ type: 'codex-ready', pid: process.pid }) + '\\n');
     setInterval(() => {}, 1000);
@@ -196,7 +199,7 @@ process.stdin.setRawMode = value => { process.stdin.isRaw = value; return proces
   return Object.assign(context, { application, config, record, env, preloads, tokenFile });
 }
 
-async function run(t, context, args, { terminal = false, setup = false, interruptAt, signal = 'SIGTERM', cwd } = {}) {
+async function run(t, context, args, { terminal = false, setup = false, interruptAt, signal = 'SIGTERM', cwd, timeoutMs = 6000 } = {}) {
   const previousRelayConnections = relayConnections;
   const preload = terminal === true ? context.preloads.terminal : context.preloads[terminal];
   const argv = [...(preload ? ['--import', preload] : []), path.join(context.application, 'bin', 'mcodex.js'), ...args];
@@ -222,8 +225,8 @@ async function run(t, context, args, { terminal = false, setup = false, interrup
   const completion = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
-      reject(new Error('CLI flow did not complete within six seconds.'));
-    }, 6000);
+      reject(new Error(`CLI flow did not complete within ${timeoutMs} ms.`));
+    }, timeoutMs);
     child.once('error', error => { clearTimeout(timeout); reject(error); });
     child.once('close', (code, exitSignal) => { clearTimeout(timeout); resolve({ code, exitSignal }); });
   });
@@ -682,3 +685,20 @@ test('local doctor reports launch directory and independent home paths without a
   }
   assert.equal((await events(context)).length, 0);
 });
+
+for (const [component, options] of [
+  ['Codex', { engineVersionDelayMs: 5500 }],
+  ['native transport', { nativeVersionDelayMs: 5500 }],
+]) {
+  test(`local doctor accepts a cold ${component} version probe above the normal five-second budget`, async t => {
+    const context = await fixture(t, options);
+    const result = await run(t, context, ['doctor', '--local'], { timeoutMs: 12000 });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /Codex \d+\.\d+\.\d+; source: bundled; compatibility: tested/);
+    assert.match(result.stdout, /Native transport: mlab-gateway 0\.4\.2; source: bundled; package: 0\.1\.3; bundled match: verified/);
+    assert.match(result.stdout, /local checks only; no gateway connection/);
+    assert.equal(result.relayConnections, 0);
+    assert.equal((await events(context)).length, 0);
+    await assert.rejects(readFile(context.record), { code: 'ENOENT' });
+  });
+}
