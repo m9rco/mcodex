@@ -2,12 +2,16 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 const CONFIG_NAME = 'config.json';
 const TOKEN_NAME = 'server.key';
+const MODELS_NAME = 'models.json';
 const MAX_CONFIG_BYTES = 8192;
 const MAX_TOKEN_BYTES = 4096;
+const MAX_MODELS_BYTES = 2 * 1024 * 1024;
+export const MODEL_CACHE_MAX_AGE_MS = 60_000;
+export const catalogScopePattern = /^v1-[0-9a-f]{64}$/;
 
 function stateError(message, code = 'MCODEX_STATE_INVALID') {
   const error = new Error(message);
@@ -138,7 +142,7 @@ async function readPrivateFile(filename, description, limit) {
   }
 }
 
-async function atomicWrite(directory, filename, value) {
+async function atomicWrite(directory, filename, value, stillCurrent) {
   const temporary = path.join(directory, `.${filename}.${randomBytes(16).toString('hex')}.tmp`);
   let handle;
   try {
@@ -146,9 +150,22 @@ async function atomicWrite(directory, filename, value) {
     await handle.chmod(0o600);
     await handle.writeFile(value, { encoding: 'utf8' });
     await handle.sync();
+    const written = await handle.stat();
     await handle.close();
     handle = undefined;
-    await fs.rename(temporary, path.join(directory, filename));
+    if (stillCurrent && !await stillCurrent()) return false;
+    const destination = path.join(directory, filename);
+    await fs.rename(temporary, destination);
+    if (stillCurrent && !await stillCurrent()) {
+      // Logout can run while rename is in progress. Do not leave discovery data
+      // behind, and avoid removing a different writer's replacement.
+      const current = await fs.lstat(destination).catch(() => null);
+      if (current?.dev === written.dev && current?.ino === written.ino) {
+        await fs.unlink(destination).catch(() => {});
+      }
+      return false;
+    }
+    return true;
   } finally {
     await handle?.close();
     await fs.unlink(temporary).catch((error) => {
@@ -201,6 +218,9 @@ export async function saveState(directory, { server, token, model }) {
   ]);
   await atomicWrite(directory, TOKEN_NAME, `${canonicalToken}\n`);
   await atomicWrite(directory, CONFIG_NAME, `${JSON.stringify(config, null, 2)}\n`);
+  // Login explicitly revalidates the catalog; never carry discovery data from
+  // a previous account or credential into a new saved connection.
+  await fs.unlink(path.join(directory, MODELS_NAME)).catch(() => {});
   return { server: config.server, model: config.model, tokenFile: path.join(directory, TOKEN_NAME) };
 }
 
@@ -213,6 +233,9 @@ export async function deleteState(directory) {
   await Promise.all(filenames.map((filename) => fs.unlink(filename).catch((error) => {
     if (error.code !== 'ENOENT') throw error;
   })));
+  // Optional/corrupt cache must never prevent removal of credentials. Unlink
+  // removes a link itself, without following or modifying its target.
+  await fs.unlink(path.join(directory, MODELS_NAME)).catch(() => {});
   await fs.rmdir(directory).catch((error) => {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTEMPTY' && error.code !== 'EEXIST') throw error;
   });
@@ -221,4 +244,62 @@ export async function deleteState(directory) {
 /** Revalidate private file permissions before using a Token for a TLS probe. */
 export async function readConnectionToken(state) {
   return validateToken((await readPrivateFile(state.tokenFile, 'The mcodex connection key', MAX_TOKEN_BYTES + 1)).trim());
+}
+
+export async function modelCacheIdentity(state) {
+  const token = await readConnectionToken(state);
+  return createHash('sha256').update(JSON.stringify([validateServer(state.server), token])).digest('hex');
+}
+
+function validCatalog(models) {
+  return Array.isArray(models) && models.length > 0
+    && models.every(model => model && typeof model.id === 'string'
+      && model.id.length > 0 && model.id.length <= 200 && !/[\u0000-\u001f\u007f]/u.test(model.id));
+}
+
+/** Optional discovery data, never proof of authentication or model access. */
+export async function loadModelCache(state, { now = Date.now() } = {}) {
+  try {
+    const directory = path.dirname(state.tokenFile);
+    await inspectDirectory(directory);
+    const value = JSON.parse(await readPrivateFile(path.join(directory, MODELS_NAME), 'The mcodex model cache', MAX_MODELS_BYTES));
+    if (value?.version !== 1 || !catalogScopePattern.test(value.scope ?? '')
+        || !Number.isSafeInteger(value.savedAt) || value.savedAt > now
+        || now - value.savedAt >= MODEL_CACHE_MAX_AGE_MS || !validCatalog(value.models)
+        || value.identity !== await modelCacheIdentity(state)) return null;
+    return value;
+  } catch {
+    // Corrupt, unsafe or missing optional cache falls back to authenticated
+    // discovery. It must never prevent login or become an alternative key file.
+    return null;
+  }
+}
+
+export async function saveModelCache(state, { scope, models, identity }, { now = Date.now() } = {}) {
+  try {
+    if (!catalogScopePattern.test(scope ?? '') || !validCatalog(models)
+        || identity !== await modelCacheIdentity(state)) return false;
+    const directory = path.dirname(state.tokenFile);
+    // Do not recreate state after logout, or write through an unsafe cache.
+    await inspectDirectory(directory);
+    await inspectManagedFile(path.join(directory, MODELS_NAME), 'The mcodex model cache', { missing: true });
+    const value = JSON.stringify({ version: 1, identity, scope, savedAt: now, models });
+    if (Buffer.byteLength(value) > MAX_MODELS_BYTES) return false;
+    return await atomicWrite(directory, MODELS_NAME, value + '\n',
+      async () => identity === await modelCacheIdentity(state).catch(() => null));
+  } catch {
+    return false;
+  }
+}
+
+export async function clearModelCache(state, identity) {
+  try {
+    const directory = path.dirname(state.tokenFile);
+    await inspectDirectory(directory);
+    const filename = path.join(directory, MODELS_NAME);
+    const value = JSON.parse(await readPrivateFile(filename, 'The mcodex model cache', MAX_MODELS_BYTES));
+    if (value.identity === identity) await fs.unlink(filename);
+  } catch {
+    // Cache invalidation is best effort; a rejected connection can never use it.
+  }
 }

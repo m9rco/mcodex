@@ -115,15 +115,15 @@ async function stdinToken(signal) {
   }
 }
 
-async function connectWithStatus(state, signal, { telemetry = true } = {}) {
-  if (!process.stderr.isTTY) return startTunnel(state, { signal });
+async function connectWithStatus(state, signal, { telemetry = false, allowCachedModels = false } = {}) {
+  if (!process.stderr.isTTY) return startTunnel(state, { signal, allowCachedModels });
   console.error('mcodex: Connecting to the gateway...');
   const progress = setInterval(() => {
     console.error('mcodex: Still connecting to the gateway...');
   }, 5000);
   progress.unref();
   try {
-    const tunnel = await startTunnel(state, { signal });
+    const tunnel = await startTunnel(state, { signal, allowCachedModels });
     console.error(`mcodex: Connection verified in ${tunnel.connectionMs.toFixed(0)} ms (includes startup and authentication).`);
     formatNative(tunnel.native).forEach(line => console.error(`mcodex: ${line}`));
     try {
@@ -257,7 +257,10 @@ export async function main(args) {
     if (args[0] === 'doctor' && args.length !== 1) throw new Error('mcodex doctor takes no arguments.');
     await resolveNative();
     const engine = args[0] === 'ping' ? undefined : await resolveEngine({ signal: controller.signal });
-    tunnel = await connectWithStatus(state, controller.signal, { telemetry: args[0] !== 'ping' });
+    tunnel = await connectWithStatus(state, controller.signal, {
+      telemetry: args[0] === 'doctor',
+      allowCachedModels: !['doctor', 'ping'].includes(args[0]),
+    });
     if (args[0] === 'ping') {
       if (ping.compare) {
         let candidate;

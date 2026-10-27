@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { bundledCodexEntry, commandVersion, engineCommand, resolveEngine } from './engine.js';
-import { formatConnectionFailure, readConnectionFailure } from './latency.js';
+import { formatConnectionFailure, readConnectionFailure, readDiagnostics } from './latency.js';
+import { catalogScopePattern, clearModelCache, loadModelCache, MODEL_CACHE_MAX_AGE_MS, modelCacheIdentity, saveModelCache } from './state.js';
 import { withShellEnvironment } from './shell-environment.js';
 
 const require = createRequire(import.meta.url);
@@ -80,7 +81,7 @@ async function stopProcess(child, exitSignal = 'SIGTERM') {
   });
 }
 
-export async function startTunnel(state, { binary, timeoutMs = 30000, signal } = {}) {
+export async function startTunnel(state, { binary, timeoutMs = 30000, signal, allowCachedModels = false } = {}) {
   const startedAt = performance.now();
   const native = await inspectNative({ binary, signal });
   binary = native.path;
@@ -93,13 +94,26 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
   let closed = false;
   let failure;
   let origin;
+  const lifetime = new AbortController();
+  const requestSignal = ms => AbortSignal.any([lifetime.signal, AbortSignal.timeout(ms), ...(signal ? [signal] : [])]);
+  let catalogRefresh;
+  let cacheIdentity;
+  let cached;
   const close = async () => {
     if (closed) return;
     closed = true;
+    lifetime.abort();
+    await catalogRefresh;
     await stopProcess(child);
     await rm(directory, { recursive: true, force: true });
   };
   try {
+    cacheIdentity = await modelCacheIdentity(state).catch(() => null);
+    if (allowCachedModels) {
+      cached = await loadModelCache(state);
+      if (cached?.identity !== cacheIdentity
+          || (state.model && !cached?.models.some(model => model.id === state.model))) cached = null;
+    }
     await writeFile(keyFile, `${key}\n`, { mode: 0o600, flag: 'wx' });
     const config = {
       listen: '127.0.0.1:0',
@@ -131,34 +145,98 @@ export async function startTunnel(state, { binary, timeoutMs = 30000, signal } =
     const deadline = Date.now() + timeoutMs;
     let lastStatus;
     let lastConnectionFailure;
+    const rejectHandshake = async observed => {
+      lastConnectionFailure = observed;
+      if (observed?.stage === 'handshake'
+          && (observed.code === 'handshake_invalid'
+            || (observed.code === 'handshake_rejected' && [400, 401, 403, 404, 405, 426].includes(observed.status)))) {
+        await clearModelCache(state, cacheIdentity);
+        throw Object.assign(new Error(`Gateway connection rejected: ${formatConnectionFailure(observed)}. Check the gateway endpoint, connection Token and supported tunnel protocol.`), { code: 'MCODEX_CONNECTION_REJECTED' });
+      }
+    };
+    const readCatalog = async ms => {
+      const response = await fetch(`${origin}/v1/models`, {
+        headers: { Authorization: `Bearer ${key}` }, signal: requestSignal(ms),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        if ([401, 403].includes(response.status)) {
+          await clearModelCache(state, cacheIdentity);
+          throw Object.assign(new Error('Gateway authentication failed. Run mcodex login with a valid connection Token.'), { code: 'MCODEX_AUTH_FAILED' });
+        }
+        return { status: response.status };
+      }
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of response.body ?? []) {
+        size += chunk.byteLength;
+        if (size > 2 * 1024 * 1024) throw Object.assign(new Error('The gateway returned an invalid model catalog.'), { code: 'MCODEX_CATALOG_INVALID' });
+        chunks.push(Buffer.from(chunk));
+      }
+      let data;
+      try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      if (!Array.isArray(data?.data)) throw Object.assign(new Error('The gateway returned an invalid model catalog.'), { code: 'MCODEX_CATALOG_INVALID' });
+      return { status: response.status, models: data.data, scope: response.headers.get('x-mlab-catalog-scope') };
+    };
+    const persistCatalog = async catalog => {
+      if (!allowCachedModels || !cacheIdentity || !catalogScopePattern.test(catalog.scope ?? '') || closed) return;
+      // HTTP discovery and the currently authenticated WSS must agree. A
+      // reconnect/account change must never put a catalog under an old scope.
+      const ready = await readDiagnostics({ origin, key }, { signal: requestSignal(500), timeoutMs: 500 });
+      if (ready.connected && ready.catalog_scope === catalog.scope && !closed) {
+        if (catalog.models.length === 0) await clearModelCache(state, cacheIdentity);
+        else await saveModelCache(state, { scope: catalog.scope, models: catalog.models, identity: cacheIdentity });
+      }
+    };
+    const finish = (models, modelsSource) => ({
+      origin, key, models, modelsSource, connectionMs: performance.now() - startedAt,
+      child, close, directory, native, catalogRefresh,
+    });
     while (Date.now() < deadline) {
       signal?.throwIfAborted();
       if (failure) throw failure;
       if (origin) {
         try {
-          const response = await fetch(`${origin}/v1/models`, {
-            headers: { Authorization: `Bearer ${key}` },
-            signal: AbortSignal.any([AbortSignal.timeout(Math.min(3000, Math.max(1, deadline - Date.now()))), ...(signal ? [signal] : [])]),
-          });
-          lastStatus = response.status;
-          if (response.ok) {
-            const data = await response.json();
-            if (!Array.isArray(data.data)) throw new Error('The gateway returned an invalid model catalog.');
-            return { origin, key, models: data.data, connectionMs: performance.now() - startedAt, child, close, directory, native };
+          if (cached && Date.now() - cached.savedAt >= MODEL_CACHE_MAX_AGE_MS) cached = null;
+          if (cached) {
+            let ready;
+            try {
+              ready = await readDiagnostics({ origin, key }, { signal: requestSignal(500), timeoutMs: Math.min(500, Math.max(1, deadline - Date.now())) });
+            } catch { signal?.throwIfAborted(); }
+            if (ready?.available && !ready.connected) {
+              await rejectHandshake(ready.last_connection_error);
+              await delay(100, undefined, { signal });
+              continue;
+            }
+            if (ready?.connected && ready.catalog_scope === cached.scope
+                && Date.now() - cached.savedAt < MODEL_CACHE_MAX_AGE_MS) {
+              const models = cached.models;
+              catalogRefresh = (async () => {
+                const catalog = await readCatalog(3000);
+                if (catalog.models) await persistCatalog(catalog);
+              })().catch(() => {
+                // Optional refresh never replays inference or writes into the
+                // TUI. Authentication rejection has already invalidated cache.
+              });
+              return finish(models, 'cache');
+            }
+            // Legacy/malformed diagnostics or a changed account use the
+            // original authenticated discovery path, never an offline launch.
+            cached = null;
           }
-          await response.body?.cancel();
-          if ([401, 403].includes(lastStatus)) throw new Error('Gateway authentication failed. Run mcodex login with a valid connection Token.');
+          const catalog = await readCatalog(Math.min(3000, Math.max(1, deadline - Date.now())));
+          lastStatus = catalog.status;
+          if (catalog.models) {
+            signal?.throwIfAborted();
+            catalogRefresh = persistCatalog(catalog).catch(() => {});
+            return finish(catalog.models, 'gateway');
+          }
           // A successful reconnect clears the native observation. Do not keep a
           // stale handshake failure when the remaining fault is upstream HTTP.
-          lastConnectionFailure = await readConnectionFailure(origin, key, { signal, timeoutMs: Math.min(500, Math.max(1, deadline - Date.now())) });
-          if (lastConnectionFailure?.stage === 'handshake'
-            && (lastConnectionFailure.code === 'handshake_invalid'
-              || (lastConnectionFailure.code === 'handshake_rejected' && [400, 401, 403, 404, 405, 426].includes(lastConnectionFailure.status)))) {
-            throw Object.assign(new Error(`Gateway connection rejected: ${formatConnectionFailure(lastConnectionFailure)}. Check the gateway endpoint, connection Token and supported tunnel protocol.`), { code: 'MCODEX_CONNECTION_REJECTED' });
-          }
+          await rejectHandshake(await readConnectionFailure(origin, key, { signal, timeoutMs: Math.min(500, Math.max(1, deadline - Date.now())) }));
         } catch (error) {
           if (signal?.aborted) throw error;
-          if (lastStatus === 401 || lastStatus === 403 || error.code === 'MCODEX_CONNECTION_REJECTED' || error.message === 'The gateway returned an invalid model catalog.') throw error;
+          if (['MCODEX_AUTH_FAILED', 'MCODEX_CONNECTION_REJECTED', 'MCODEX_CATALOG_INVALID'].includes(error.code)) throw error;
         }
       }
       await delay(100, undefined, { signal });

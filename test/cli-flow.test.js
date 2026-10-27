@@ -16,6 +16,8 @@ const transportVersion = '0.4.2';
 // This plain HTTP fixture immediately rejects TLS, while inference uses the
 // separate authenticated transport fixture below.
 const relayFixture = createServer();
+let relayConnections = 0;
+relayFixture.on('connection', () => { relayConnections++; });
 relayFixture.on('clientError', (_error, socket) => socket.destroy());
 await new Promise(resolve => relayFixture.listen(0, '127.0.0.1', resolve));
 const server = `wss://127.0.0.1:${relayFixture.address().port}/tunnel`;
@@ -195,6 +197,7 @@ process.stdin.setRawMode = value => { process.stdin.isRaw = value; return proces
 }
 
 async function run(t, context, args, { terminal = false, setup = false, interruptAt, signal = 'SIGTERM', cwd } = {}) {
+  const previousRelayConnections = relayConnections;
   const preload = terminal === true ? context.preloads.terminal : context.preloads[terminal];
   const argv = [...(preload ? ['--import', preload] : []), path.join(context.application, 'bin', 'mcodex.js'), ...args];
   const child = spawn(process.execPath, argv, { cwd, env: context.env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -243,7 +246,7 @@ async function run(t, context, args, { terminal = false, setup = false, interrup
   })().catch(error => { child.kill('SIGTERM'); throw error; });
   const [{ code, exitSignal }] = await Promise.all([completion, action]);
   assert.equal(stdout.includes(token) || stderr.includes(token), false, 'connection Token must not appear in terminal output');
-  return { code, exitSignal, stdout, stderr, serverSent, tokenSent };
+  return { code, exitSignal, stdout, stderr, serverSent, tokenSent, relayConnections: relayConnections - previousRelayConnections };
 }
 
 async function assertClean(context, { starts = 1, catalogRequests = 1 } = {}) {
@@ -270,11 +273,14 @@ async function assertSavedWithoutHandoff(context, result) {
   assert.equal((await readFile(path.join(context.config, 'server.key'), 'utf8')).trim(), token);
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
   await assertClean(context);
+  assert.equal(result.relayConnections, 0, 'login must not open an independent relay probe');
+  assert.equal((await events(context)).some(event => event.type === 'diagnostics-request'), false, 'login must not wait for optional diagnostics');
 }
 
 async function assertHandoff(context, result, code = 17) {
   assert.equal(result.code, code, 'the wrapper must preserve the official CLI exit status');
   assert.equal(result.stdout, codexOutput, 'wrapper status must not add anything to Codex stdout');
+  assert.equal(result.relayConnections, 0, 'ordinary startup must not open an independent relay probe');
   const child = JSON.parse(await readFile(context.record, 'utf8'));
   const allowed = ['MCODEX_LOCAL_KEY', 'NO_PROXY', 'no_proxy', 'BASH_ENV', 'ZDOTDIR'];
   assert.equal(child.addedEnvironmentKeys.every(key => allowed.includes(key)), true, 'only local authentication, loopback exclusions and private shell startup paths may be introduced');
@@ -342,15 +348,15 @@ const currentDiagnostics = { schema_version: 1, connected: true, hops: [], tunne
   configured_max_body_bytes: 16 * 1024 * 1024, request_body_budget_bytes: 128 * 1024 * 1024,
 } };
 
-test('interactive startup reports actual engine, transport, gateway and negotiated limits', async t => {
+test('interactive startup reports local versions without requesting optional diagnostics or relay probes', async t => {
   const context = await fixture(t, { configured: true, diagnostics: currentDiagnostics });
   const result = await run(t, context, [], { terminal: true });
   await assertHandoff(context, result);
   assert.match(result.stderr, new RegExp(`mcodex ${packageManifest.version.replaceAll('.', '\\.')}`));
   assert.match(result.stderr, /Codex \d+\.\d+\.\d+; source: bundled/);
   assert.match(result.stderr, /Native transport: mlab-gateway 0.4.2; source: bundled; package: 0.1.3; bundled match: verified/);
-  assert.match(result.stderr, /Gateway version: 0.4.2/);
-  assert.match(result.stderr, /protocol v2; request-body cap 16.0 MiB/);
+  assert.doesNotMatch(result.stderr, /Gateway version:|request-body cap|WSS heartbeat RTT|Per-hop probe/);
+  assert.equal((await events(context)).some(event => event.type === 'diagnostics-request'), false);
 });
 
 test('doctor shows native package and gateway versions and keeps different limits distinct', async t => {
@@ -361,7 +367,9 @@ test('doctor shows native package and gateway versions and keeps different limit
   assert.match(result.stdout, /Gateway version: 0.4.2/);
   assert.match(result.stdout, /protocol v2; request-body cap 16.0 MiB/);
   assert.match(result.stdout, /413 is a transport request-body limit; 400 context_length_exceeded is the model token window; 429 may be a local memory\/concurrency limit or upstream quota/);
-  await assertClean(context);
+  const list = await assertClean(context);
+  assert.equal(list.filter(event => event.type === 'diagnostics-request').length, 1);
+  assert.equal(result.relayConnections, 1, 'doctor must still probe the configured relay');
 });
 
 test('legacy protocol fallback warns that both client and server determine the body cap', async t => {
@@ -454,7 +462,9 @@ test('ping measures the configured tunnel without opening Codex and cleans up', 
   assert.match(result.stdout, /min\/avg\/max: [\d.]+\/[\d.]+\/[\d.]+ ms/);
   assert.match(result.stdout, /Failed requests: 0\/5/);
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
-  await assertClean(context, { catalogRequests: 6 });
+  const list = await assertClean(context, { catalogRequests: 6 });
+  assert.equal(list.filter(event => event.type === 'diagnostics-request').length, 1);
+  assert.equal(result.relayConnections, 1, 'ping must still probe the configured relay');
 });
 
 for (const args of [['engine', 'status'], ['doctor', '--local'], ['--version']]) {
@@ -518,12 +528,15 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-test('malformed optional diagnostics do not prevent interactive Codex startup', async t => {
-  const context = await fixture(t, { configured: true, diagnostics: 'malformed' });
-  const result = await run(t, context, [], { terminal: true });
-  await assertHandoff(context, result);
-  assert.match(result.stderr, /telemetry unavailable \(probe failed\)/);
-});
+for (const diagnostics of ['malformed', 'blocked']) {
+  test(`${diagnostics} optional diagnostics are not requested during interactive Codex startup`, async t => {
+    const context = await fixture(t, { configured: true, diagnostics });
+    const result = await run(t, context, [], { terminal: true });
+    await assertHandoff(context, result);
+    assert.equal((await events(context)).some(event => event.type === 'diagnostics-request'), false);
+    assert.doesNotMatch(result.stderr, /telemetry unavailable|Per-hop probe/);
+  });
+}
 
 test('route comparison launches two independent authenticated transports and cleans both', async t => {
   const context = await fixture(t, { configured: true });
@@ -612,11 +625,11 @@ test('cancelling a paired comparison stops both transports and leaves saved sett
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
 });
 
-test('cancellation during optional startup diagnostics cleans transport without launching Codex', async t => {
+test('cancellation during explicit doctor diagnostics cleans transport without launching Codex', async t => {
   const context = await fixture(t, { configured: true, diagnostics: 'blocked' });
-  const result = await run(t, context, [], { terminal: true, interruptAt: 'diagnostics' });
+  const result = await run(t, context, ['doctor'], { terminal: true, interruptAt: 'diagnostics' });
   assert.equal(result.code, 1);
-  assert.equal(result.stdout, '');
+  assert.match(result.stdout, /^Launcher [^\n]+; runtime [^\n]+; source: bundled\.\n$/);
   assert.match(result.stderr, /Interrupted by SIGTERM/);
   await assert.rejects(readFile(context.record), { code: 'ENOENT' });
   await assertClean(context);
