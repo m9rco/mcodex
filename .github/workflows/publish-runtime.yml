@@ -53,9 +53,18 @@ jobs:
             echo 'Tag does not match the runtime version'; exit 1
           fi
       - run: npm ci --omit=optional --ignore-scripts
+      - name: Ensure Linux Zsh startup regression coverage
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -x /bin/zsh ]; then
+            sudo apt-get update
+            sudo apt-get install --yes zsh
+          fi
       - run: npm run check && npm test
       - run: node scripts/build-runtime.mjs --output "$RUNNER_TEMP/runtime-dist"
       - run: node scripts/verify-runtime-artifact.mjs "$RUNNER_TEMP/runtime-dist" --workspace
+        env:
+          MCODEX_WORKSPACE_REQUIRE_ZSH: '1'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runtime-${{ matrix.target }}

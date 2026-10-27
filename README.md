@@ -80,6 +80,8 @@ mcodex exec "解释这个仓库的入口"
 
 在项目目录运行 `mcodex` 即使用该目录；也可用 `mcodex --cd /home/pushaowei` 明确选择。mcodex 默认给模型的 shell 工具设置 `allow_login_shell=false`，避免登录配置中的 `cd` 在命令执行前把目录切回 `/root` 等主目录。已有终端环境会继承；需要重新加载登录配置时可显式传 `-c allow_login_shell=true`。`mcodex doctor --local` 显示启动目录、`HOME` 和 `CODEX_HOME`，便于区分工作区与用户配置目录；详细复现与限制见[目录漂移排查](docs/ENGINE-AND-CONTEXT.md#工作目录与-shell-启动配置)。
 
+运行包 0.3.1 还修复了非登录启动文件切目录的问题：Bash/Zsh 仍执行原有初始化，随后恢复本次工具的入口目录，再执行工具命令。0.3.0 启动器用户运行 `mcodex update` 获取修复，并重新启动 mcodex 会话；无需再次更新 npm。
+
 ## 工作方式
 
 ```mermaid

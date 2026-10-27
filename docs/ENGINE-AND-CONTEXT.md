@@ -24,7 +24,11 @@ mcodex 的 Codex 子进程从调用时的实际工作目录启动；`HOME` 和 `
 
 已在隔离 Linux 容器中用官方 Codex 0.163.0 复现：从 `/home/pushaowei` 启动、`HOME=/root`，登录配置执行 `cd /root`，同时禁用 shell snapshot。模型收到的 `<cwd>` 正确，但工具的 `bash -lc` 在初始化后进入 `/root`，相对路径读取失败。仅把 `allow_login_shell` 改为 `false` 后，`bash -c` 保持工作目录并正确读取文件。正常生成的默认 snapshot 能保护该测试的目录；仅有 `HOME=/root` 或过时的 `PWD` 并不会必然导致故障。未检查具体机器的 profile 时，不能将该复现视为其唯一原因。
 
-mcodex 因此默认通过进程参数设置 `allow_login_shell=false`，避免模型工具在无快照路径重新执行登录配置。它不修改用户的配置文件、主目录、沙箱或审批策略。当前终端导出的环境仍会继承；只定义在登录配置中的变量/函数可能不再可用。需要原行为时，显式运行 `mcodex -c allow_login_shell=true`，并确保登录配置不无条件切目录。非登录启动文件（如 `BASH_ENV`、`.zshenv`）以及命令本身仍可切换目录，这不是工作目录锁定机制。
+mcodex 因此默认通过进程参数设置 `allow_login_shell=false`，避免模型工具在无快照路径重新执行登录配置。它不修改用户的配置文件、主目录、沙箱或审批策略。当前终端导出的环境仍会继承；只定义在登录配置中的变量/函数可能不再可用。需要原行为时，显式运行 `mcodex -c allow_login_shell=true`，并确保登录配置不无条件切目录。
+
+运行包 0.3.1 补充了另一条可复现路径：非登录 Bash 仍读取 `BASH_ENV`，Zsh 仍读取 `.zshenv`。其中的 `cd "$HOME"` 可使 0.3.0 的工具进入主目录，即使会话 `<cwd>` 正确且 `allow_login_shell=false`。现在每个 Codex 进程使用临时私有启动文件，先记住本次 shell 的实际入口目录，执行原来的非登录初始化，再恢复该目录。环境变量、函数和选项仍可初始化，`--cd` 和模型显式选择的有效 workdir 也分别保持；没有用一个固定会话目录覆盖所有工具。
+
+这些启动文件由当前用户拥有，目录 `0700`、文件 `0600`，在 Codex 正常退出、错误或取消后清理。原有初始化文件不改写；HOME/CODEX_HOME 仍保持。显式登录 shell 保留原启动行为，命令体内的 `cd` 也仍有效；这不是目录访问锁。BASH_ENV/ENV 使用文件路径（支持相对路径、`~` 和普通环境变量引用），不会对路径执行命令替换或 eval。
 
 同时修复了配置作用域问题：官方 0.163.0 在 `exec` 后收到 `-c` 时，会替换根级的整组 `-c`，连包装器的网关和 shell 配置也会丢失。mcodex 现在将用户的 `-c`/`--config`（含连写形式）与包装器默认值放在同一作用域，用户配置按原顺序后置，最后一个值优先。`--` 后的字面参数保持不变。这使 `mcodex exec -c features.shell_snapshot=false ...` 也能保持网关路由和工作目录修复。
 
@@ -37,7 +41,7 @@ mcodex --cd /home/pushaowei -c allow_login_shell=false
 
 新代码的 `mcodex doctor --local` 无需连接网关，即显示启动目录、`HOME`、`CODEX_HOME` 和包装器 shell 默认值。仍有目录问题时，比较会话 `<cwd>`、工具的 `pwd`、`--cd`/resume 选择和实际引擎版本；不要用改 `HOME` 的方式纠正工作区，这可能导致登录、技能和历史记录加载位置变化。
 
-维护者可运行 `node scripts/verify-workspace.mjs`：本机 Responses fixture 给真实引擎发送固定的 `pwd` 和文件读取工具调用，不调用模型。通过 `MCODEX_WORKSPACE_TEST_CODEX_BIN` 指定待测官方引擎。该测试在临时目录与独立配置下运行，覆盖登录 shell 失败对照、无快照路径、默认快照和三种显式目录参数；它仅为固定测试命令关闭 OS 沙箱，不作为沙箱兼容性验证，也不改变 mcodex 的生产审批设置。
+维护者可运行 `node scripts/verify-workspace.mjs`：本机 Responses fixture 给真实引擎发送固定的 `pwd` 和文件读取工具调用，不调用模型。通过 `MCODEX_WORKSPACE_TEST_CODEX_BIN` 指定待测官方引擎。该测试在临时目录与独立配置下运行，覆盖登录 shell 失败对照、无快照路径、默认快照、三种显式目录参数，以及非登录 Bash/Zsh 初始化和模型选择 workdir。`MCODEX_WORKSPACE_REQUIRE_ZSH=1` 要求 Zsh 用例不得跳过，发行 CI 会先确保安装 Zsh；本地可用 `MCODEX_WORKSPACE_TEST_FILTER` 按用例名称筛选。它仅为固定测试命令关闭 OS 沙箱，不作为沙箱兼容性验证，也不改变 mcodex 的生产审批设置。
 
 官方行为依据：[shell 参数构造](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/shell.rs)、[shell snapshot](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/shell_snapshot.rs)。
 
