@@ -5,7 +5,9 @@ on:
     paths:
       - 'src/**'
       - 'scripts/*runtime*'
+      - 'scripts/verify-agents.mjs'
       - 'test/runtime-update.test.js'
+      - 'test/agent-compatibility.test.js'
       - '.github/workflows/publish-runtime.yml'
   push:
     tags: ['runtime-v*']

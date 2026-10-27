@@ -1,0 +1,8 @@
+OpenAI Codex model catalog
+Copyright OpenAI
+Licensed under Apache-2.0; see codex-models.LICENSE.
+
+codex-models.json is derived from the official catalog at rust-v0.163.0
+(identical to rust-v0.162.1). Only declared multi_agent_version values were
+changed from v2 to v1 for ChatGPT plan usage compatibility.
+Source and checksums: agent-compatibility.json.

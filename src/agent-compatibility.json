@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "engineVersions": [
+    "0.162.1",
+    "0.163.0"
+  ],
+  "source": "https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/models-manager/models.json",
+  "sourceSha256": "943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b",
+  "sourceSemanticSha256": "7359ceba1d5b5226fe3b675bb7b6df4e21d70d310c3b88ed67eb97ccaa8a7e80",
+  "overrides": [
+    "gpt-6-astra",
+    "gpt-6.1-sol",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-daybreak-blue-latest",
+    "gpt-daybreak-red-latest"
+  ]
+}

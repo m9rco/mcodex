@@ -1,3 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const agentCompatibility = JSON.parse(readFileSync(new URL('./agent-compatibility.json', import.meta.url), 'utf8'));
+const compatibleCatalog = fileURLToPath(new URL('./codex-models.json', import.meta.url));
+
 export function providerArguments({ origin, model, engine }) {
   const values = {
     // The official updater installs a separate global Codex. The exact bundled
@@ -8,6 +14,13 @@ export function providerArguments({ origin, model, engine }) {
     // caller's environment without rerunning login profiles. User -c overrides
     // follow these defaults and can explicitly opt back in.
     allow_login_shell: false,
+    // A false V2 feature flag alone does not override the model's V2 metadata.
+    // Use the exact upstream catalog with only V2 agent wire formats changed to
+    // V1, so local parallel agents use supported function/custom tool history.
+    ...(agentCompatibility.engineVersions.includes(engine?.version) ? {
+      'features.multi_agent_v2': false,
+      model_catalog_json: compatibleCatalog,
+    } : {}),
     model_provider: 'mcodex',
     model,
     'model_providers.mcodex.name': 'mcodex gateway',

@@ -23,6 +23,9 @@ try {
     execFileSync(process.execPath, [path.join(root, 'scripts/verify-workspace.mjs')], { cwd: root, stdio: 'inherit',
       env: { ...process.env, MCODEX_WORKSPACE_TEST_RUNTIME_ROOT: runtime,
         MCODEX_WORKSPACE_TEST_CODEX_BIN: path.join(runtime, 'node_modules/@openai/codex/bin/codex.js') } });
+    execFileSync(process.execPath, [path.join(root, 'scripts/verify-agents.mjs')], { cwd: root, stdio: 'inherit',
+      env: { ...process.env, MCODEX_AGENT_TEST_RUNTIME_ROOT: runtime,
+        MCODEX_AGENT_TEST_CODEX_BIN: path.join(runtime, 'node_modules/@openai/codex/bin/codex.js') } });
   }
   console.log(`Runtime ${artifact.version} ${target}: archive, local dependencies and health verified.`);
 } finally { await rm(temporary, { recursive: true, force: true }); }

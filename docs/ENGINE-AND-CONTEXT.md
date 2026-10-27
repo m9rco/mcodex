@@ -45,6 +45,28 @@ mcodex --cd /home/pushaowei -c allow_login_shell=false
 
 官方行为依据：[shell 参数构造](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/shell.rs)、[shell snapshot](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/shell_snapshot.rs)。
 
+## 本地并行 agent 与订阅请求格式
+
+运行包 0.3.2 修复 `subscription_sharing_unsupported_capability` / `param=input` 的一条可复现路径：官方 Codex 0.162.1 / 0.163.0 的部分模型目录选择 v2 协作模式，子 agent 首个请求包含 `agent_message`，订阅共享接口不接受此类型。仅设置 `features.multi_agent_v2=false` 不足以覆盖模型目录中的版本选择。
+
+对上述确切引擎版本，mcodex 使用对应官方目录的兼容副本，只将声明的 `multi_agent_version` 从 `v2` 改为 `v1`，并关闭显式 v2 特性。模型提示、上下文窗口、推理级别、工具能力等其他字段均保持，单元测试通过还原并比较原目录的 SHA-256 核验。源文件、版本、摘要与变更模型列表见 `src/agent-compatibility.json`，目录遵循上游 Apache-2.0 许可证。
+
+本地并行 agent 继续通过普通 function/custom 工具调用运行，子任务结果保留；不改写、丢弃或解密请求历史。对未知外部引擎不套用旧版目录。显式 CLI 的 `model_catalog_json` 或 v2 开关仍优先，使用者需自行保证兼容。用户配置文件不改写。
+
+升级后新建会话：
+
+```sh
+mcodex update
+mcodex runtime status
+mcodex
+```
+
+已经使用 v2 并写入 `agent_message` 的旧会话不自动迁移；`continue` 或 resume 可继续携带不受支持的历史，需在新会话中交接进度。已有记录与加密内容保持原样，不能把更改新会话默认值视为修复了旧历史。
+
+维护者运行 `node scripts/verify-agents.mjs`：隔离 HOME/CODEX_HOME、真实官方引擎、固定 loopback 响应，并预设用户配置启用 v2。修复前两个子请求包含 `agent_message` 并失败；修复后两个真实子请求必须重叠，且主 agent 必须收到两份完成结果。发行验收从解压运行包加载实际业务代码和引擎再运行此测试，不调用生产模型。
+
+依据：[官方预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)、[错误恢复](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)。官方允许通过受支持的 function/custom 工具调用协调本地 agent；该能力与 Responses 的托管 `multi_agent` 功能不同。
+
 ## OpenSpec
 
 OpenSpec 的全局 CLI 安装与项目集成是两件事。项目没有 `openspec/` 和 `.agents/skills/openspec-*` 时，仅升级 CLI 不会生成项目技能。
